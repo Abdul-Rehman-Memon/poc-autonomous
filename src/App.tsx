@@ -1,31 +1,9 @@
 import React, { useState, useCallback, useMemo } from 'react';
-import { Upload, Download, FileSpreadsheet, AlertCircle, CheckCircle } from 'lucide-react';
+import { Upload, Download, FileSpreadsheet, CheckCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import type { SupplierProduct, POSProduct, MatchedProduct } from './core/interface';
+import CircularProgress from './components/CircleProgress';
 
-interface Product {
-  UPC: string;
-  [key: string]: any;
-}
-
-interface SupplierProduct extends Product {
-  TPR?: string | number;
-  cost?: number;
-  price?: number;
-}
-
-interface POSProduct extends Product {
-  cost?: number;
-  price?: number;
-}
-
-interface MatchedProduct {
-  UPC: string;
-  supplier: SupplierProduct;
-  pos: POSProduct;
-  hasTpr: boolean;
-  priceUpdated: boolean;
-  updatedFields: string[];
-}
 
 const App: React.FC = () => {
   const [supplierFile, setSupplierFile] = useState<File | null>(null);
@@ -166,23 +144,26 @@ const App: React.FC = () => {
           let priceUpdated = false;
           const updatedFields: string[] = [];
 
+          // Create a copy of POS product for potential updates
+          const updatedPosProduct = { ...posProduct };
+
           // If no TPR, check for price updates
           if (!hasTpr) {
             // Check cost field
-            if (supplierProduct.cost !== undefined && posProduct.cost !== undefined) {
-              if (Number(supplierProduct.cost) !== Number(posProduct.cost)) {
-                posProduct.cost = Number(supplierProduct.cost);
+            if (supplierProduct.BASE_UNIT_COST !== undefined && posProduct.BASE_UNIT_COST !== undefined) {
+              if (Number(supplierProduct.BASE_UNIT_COST) !== Number(posProduct.BASE_UNIT_COST)) {
+                updatedPosProduct.BASE_UNIT_COST = Number(supplierProduct.BASE_UNIT_COST);
                 priceUpdated = true;
-                updatedFields.push('cost');
+                updatedFields.push('BASE_UNIT_COST');
               }
             }
             
             // Check price field
-            if (supplierProduct.price !== undefined && posProduct.price !== undefined) {
-              if (Number(supplierProduct.price) !== Number(posProduct.price)) {
-                posProduct.price = Number(supplierProduct.price);
+            if (supplierProduct.BASE_RETAIL !== undefined && posProduct.BASE_RETAIL !== undefined) {
+              if (Number(supplierProduct.BASE_RETAIL) !== Number(posProduct.BASE_RETAIL)) {
+                updatedPosProduct.BASE_RETAIL = Number(supplierProduct.BASE_RETAIL);
                 priceUpdated = true;
-                updatedFields.push('price');
+                updatedFields.push('BASE_RETAIL');
               }
             }
           }
@@ -190,7 +171,7 @@ const App: React.FC = () => {
           matched.push({
             UPC: upc,
             supplier: supplierProduct,
-            pos: posProduct,
+            pos: updatedPosProduct, // Use updated POS product
             hasTpr,
             priceUpdated,
             updatedFields
@@ -243,36 +224,51 @@ const App: React.FC = () => {
   }, []);
 
   const downloadTprProducts = useCallback((format: 'xlsx' | 'csv') => {
-    const data = tprProducts.map(p => ({
-      UPC: p.UPC,
-      TPR: p.supplier.TPR,
-      ...p.supplier,
-      ...p.pos
-    }));
+    const data = tprProducts.map(p => {
+      // Start with all supplier columns
+      const result = { ...p.supplier };
+      
+      // Override BASE_UNIT_COST and BASE_RETAIL with POS values (which remain unchanged for TPR products)
+      result.BASE_UNIT_COST = p.pos.BASE_UNIT_COST;
+      result.BASE_RETAIL = p.pos.BASE_RETAIL;
+      
+      return result;
+    });
     downloadData(data, 'tpr_products', format);
   }, [tprProducts, downloadData]);
 
-  const downloadUpdatedProducts = useCallback((format: 'xlsx' | 'csv') => {
-    const data = updatedProducts.map(p => ({
-      UPC: p.UPC,
-      UpdatedFields: p.updatedFields.join(', '),
-      ...p.pos
-    }));
-    downloadData(data, 'updated_products', format);
-  }, [updatedProducts, downloadData]);
+  // const downloadUpdatedProducts = useCallback((format: 'xlsx' | 'csv') => {
+  //   const data = updatedProducts.map(p => {
+  //     // Start with all supplier columns
+  //     const result = { ...p.supplier };
+      
+  //     // Override BASE_UNIT_COST and BASE_RETAIL with updated POS values
+  //     result.BASE_UNIT_COST = p.pos.BASE_UNIT_COST;
+  //     result.BASE_RETAIL = p.pos.BASE_RETAIL;
+      
+  //     // Add metadata about updates
+  //     result.UPDATED_FIELDS = p.updatedFields.join(', ');
+      
+  //     return result;
+  //   });
+  //   downloadData(data, 'updated_products', format);
+  // }, [updatedProducts, downloadData]);
 
   const downloadNonTprProducts = useCallback((format: 'xlsx' | 'csv') => {
-    const data = nonTprProducts.map(p => ({
-      UPC: p.UPC,
-      Status: p.priceUpdated ? 'Updated' : 'No Change',
-      UpdatedFields: p.updatedFields.join(', ') || '-',
-      SupplierCost: p.supplier.cost || '-',
-      SupplierPrice: p.supplier.price || '-',
-      POSCost: p.pos.cost || '-',
-      POSPrice: p.pos.price || '-',
-      ...p.supplier,
-      ...p.pos
-    }));
+    const data = nonTprProducts.map(p => {
+      // Start with all supplier columns
+      const result = { ...p.supplier };
+      
+      // Override BASE_UNIT_COST and BASE_RETAIL with POS values (updated or original)
+      result.BASE_UNIT_COST = p.pos.BASE_UNIT_COST;
+      result.BASE_RETAIL = p.pos.BASE_RETAIL;
+      
+      // Add metadata
+      result.STATUS = p.priceUpdated ? 'Updated' : 'No Change';
+      result.UPDATED_FIELDS = p.updatedFields.join(', ') || '-';
+      
+      return result;
+    });
     downloadData(data, 'non_tpr_products', format);
   }, [nonTprProducts, downloadData]);
 
@@ -315,38 +311,7 @@ const App: React.FC = () => {
                 <label htmlFor="supplier-upload" className={`cursor-pointer ${uploadingSupplier ? 'pointer-events-none' : ''}`}>
                   {uploadingSupplier ? (
                     <div className="flex flex-col items-center">
-                      <div className="relative w-16 h-16 mb-3">
-                        {/* Circular progress background */}
-                        <svg className="w-16 h-16 transform -rotate-90" viewBox="0 0 64 64">
-                          <circle
-                            cx="32"
-                            cy="32"
-                            r="28"
-                            stroke="currentColor"
-                            strokeWidth="4"
-                            className="text-green-200"
-                            fill="none"
-                          />
-                          <circle
-                            cx="32"
-                            cy="32"
-                            r="28"
-                            stroke="currentColor"
-                            strokeWidth="4"
-                            className="text-green-600"
-                            fill="none"
-                            strokeDasharray="175.9"
-                            strokeDashoffset={175.9 - (175.9 * supplierProgress) / 100}
-                            strokeLinecap="round"
-                            style={{ transition: 'stroke-dashoffset 0.1s ease' }}
-                          />
-                        </svg>
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <span className="text-xs font-semibold text-green-600">
-                            {Math.round(supplierProgress)}%
-                          </span>
-                        </div>
-                      </div>
+                      <CircularProgress progress={supplierProgress} color="green" />
                       <p className="text-green-600 font-medium">Uploading...</p>
                       <p className="text-sm text-green-500 mt-1">Processing supplier file</p>
                     </div>
@@ -399,38 +364,7 @@ const App: React.FC = () => {
                 <label htmlFor="pos-upload" className={`cursor-pointer ${uploadingPos ? 'pointer-events-none' : ''}`}>
                   {uploadingPos ? (
                     <div className="flex flex-col items-center">
-                      <div className="relative w-16 h-16 mb-3">
-                        {/* Circular progress background */}
-                        <svg className="w-16 h-16 transform -rotate-90" viewBox="0 0 64 64">
-                          <circle
-                            cx="32"
-                            cy="32"
-                            r="28"
-                            stroke="currentColor"
-                            strokeWidth="4"
-                            className="text-blue-200"
-                            fill="none"
-                          />
-                          <circle
-                            cx="32"
-                            cy="32"
-                            r="28"
-                            stroke="currentColor"
-                            strokeWidth="4"
-                            className="text-blue-600"
-                            fill="none"
-                            strokeDasharray="175.9"
-                            strokeDashoffset={175.9 - (175.9 * posProgress) / 100}
-                            strokeLinecap="round"
-                            style={{ transition: 'stroke-dashoffset 0.1s ease' }}
-                          />
-                        </svg>
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <span className="text-xs font-semibold text-blue-600">
-                            {Math.round(posProgress)}%
-                          </span>
-                        </div>
-                      </div>
+                      <CircularProgress progress={posProgress} color="blue" />
                       <p className="text-blue-600 font-medium">Uploading...</p>
                       <p className="text-sm text-blue-500 mt-1">Processing POS file</p>
                     </div>
@@ -530,10 +464,10 @@ const App: React.FC = () => {
                         <tr>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">UPC</th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">TPR</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier Cost</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier Price</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">POS Cost</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">POS Price</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier BASE_UNIT_COST</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier BASE_RETAIL</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">POS BASE_UNIT_COST</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">POS BASE_RETAIL</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
@@ -541,10 +475,10 @@ const App: React.FC = () => {
                           <tr key={index} className="hover:bg-gray-50">
                             <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.UPC}</td>
                             <td className="px-4 py-3 whitespace-nowrap text-sm text-green-600 font-medium">{product.supplier.TPR}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.supplier.cost || '-'}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.supplier.price || '-'}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.pos.cost || '-'}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.pos.price || '-'}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.supplier.BASE_UNIT_COST || '-'}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.supplier.BASE_RETAIL || '-'}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.pos.BASE_UNIT_COST || '-'}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.pos.BASE_RETAIL || '-'}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -591,10 +525,10 @@ const App: React.FC = () => {
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">UPC</th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Updated Fields</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier Cost</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier Price</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">POS Cost</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">POS Price</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier BASE_UNIT_COST</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">POS BASE_UNIT_COST</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier BASE_RETAIL</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">POS BASE_RETAIL</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
@@ -615,10 +549,10 @@ const App: React.FC = () => {
                             <td className="px-4 py-3 whitespace-nowrap text-sm text-purple-600 font-medium">
                               {product.updatedFields.length > 0 ? product.updatedFields.join(', ') : '-'}
                             </td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.supplier.cost || '-'}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.supplier.price || '-'}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.pos.cost || '-'}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.pos.price || '-'}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.supplier.BASE_UNIT_COST || '-'}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.pos.BASE_UNIT_COST || '-'}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.supplier.BASE_RETAIL || '-'}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.pos.BASE_RETAIL || '-'}</td>
                           </tr>
                         ))}
                       </tbody>
