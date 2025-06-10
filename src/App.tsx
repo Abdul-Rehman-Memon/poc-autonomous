@@ -3,6 +3,7 @@ import { Upload, Download, FileSpreadsheet, CheckCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import type { SupplierProduct, POSProduct, MatchedProduct } from './core/interface';
 import CircularProgress from './components/CircleProgress';
+import { normalizeNumber } from './core/helper';
 
 
 const App: React.FC = () => {
@@ -117,79 +118,83 @@ const App: React.FC = () => {
   // Process and match products
   const processProducts = useCallback(async () => {
     if (!supplierData.length || !posData.length) return;
-
+  
     setProcessing(true);
-    
-    // Create a Map for O(1) lookup of supplier products by UPC
+  
+    // Normalize UPCs and map supplier products
     const supplierMap = new Map<string, SupplierProduct>();
     supplierData.forEach(product => {
-      if (product.UPC) {
-        supplierMap.set(String(product.UPC), product);
+      if (product.UPC !== undefined && product.UPC !== null) {
+        const normalizedUPC = normalizeNumber(product.UPC, 'supplier');
+        supplierMap.set(normalizedUPC, product);
       }
     });
-
+  
     const matched: MatchedProduct[] = [];
-    
-    // Process in chunks to avoid blocking UI
+  
     const chunkSize = 1000;
     for (let i = 0; i < posData.length; i += chunkSize) {
       const chunk = posData.slice(i, i + chunkSize);
-      
+  
       chunk.forEach(posProduct => {
-        const upc = String(posProduct.UPC);
-        const supplierProduct = supplierMap.get(upc);
-        
-        if (supplierProduct) {
-          const hasTpr = Boolean(supplierProduct.TPR && String(supplierProduct.TPR).trim() !== '');
-          let priceUpdated = false;
-          const updatedFields: string[] = [];
-
-          // Create a copy of POS product for potential updates
-          const updatedPosProduct = { ...posProduct };
-
-          // If no TPR, check for price updates
-          if (!hasTpr) {
-            // Check cost field
-            if (supplierProduct.BASE_UNIT_COST !== undefined && posProduct.BASE_UNIT_COST !== undefined) {
-              if (Number(supplierProduct.BASE_UNIT_COST) !== Number(posProduct.BASE_UNIT_COST)) {
+        if (posProduct.Barcode !== undefined && posProduct.Barcode !== null) {
+          const upc = normalizeNumber(String(posProduct.Barcode), 'pos')
+          const supplierProduct = supplierMap.get(upc);
+  
+          if (supplierProduct) {
+            const hasTpr = Boolean(
+              supplierProduct.TPR && String(supplierProduct.TPR).trim() !== ''
+            );
+            let priceUpdated = false;
+            const updatedFields: string[] = [];
+  
+            const updatedPosProduct = { ...posProduct };
+  
+            if (!hasTpr) {
+              if (
+                supplierProduct.BASE_UNIT_COST !== undefined &&
+                posProduct.BASE_UNIT_COST !== undefined &&
+                Number(supplierProduct.BASE_UNIT_COST) !== Number(posProduct.BASE_UNIT_COST)
+              ) {
                 updatedPosProduct.BASE_UNIT_COST = Number(supplierProduct.BASE_UNIT_COST);
                 priceUpdated = true;
                 updatedFields.push('BASE_UNIT_COST');
               }
-            }
-            
-            // Check price field
-            if (supplierProduct.BASE_RETAIL !== undefined && posProduct.BASE_RETAIL !== undefined) {
-              if (Number(supplierProduct.BASE_RETAIL) !== Number(posProduct.BASE_RETAIL)) {
+  
+              if (
+                supplierProduct.BASE_RETAIL !== undefined &&
+                posProduct.BASE_RETAIL !== undefined &&
+                Number(supplierProduct.BASE_RETAIL) !== Number(posProduct.BASE_RETAIL)
+              ) {
                 updatedPosProduct.BASE_RETAIL = Number(supplierProduct.BASE_RETAIL);
                 priceUpdated = true;
                 updatedFields.push('BASE_RETAIL');
               }
             }
+  
+            matched.push({
+              UPC: upc,
+              supplier: supplierProduct,
+              pos: updatedPosProduct,
+              hasTpr,
+              priceUpdated,
+              updatedFields
+            });
           }
-
-          matched.push({
-            UPC: upc,
-            supplier: supplierProduct,
-            pos: updatedPosProduct, // Use updated POS product
-            hasTpr,
-            priceUpdated,
-            updatedFields
-          });
         }
       });
-
-      // Allow UI to update
+  
+      // Let UI remain responsive
       if (i % (chunkSize * 5) === 0) {
         await new Promise(resolve => setTimeout(resolve, 1));
       }
     }
-
+  
     setMatchedProducts(matched);
     setStep(2);
     setProcessing(false);
   }, [supplierData, posData]);
-
+  
   // Filter products by TPR status
   const tprProducts = useMemo(() => 
     matchedProducts.filter(p => p.hasTpr), [matchedProducts]

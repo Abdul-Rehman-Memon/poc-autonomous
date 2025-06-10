@@ -1,9 +1,9 @@
 export interface Product {
-  UPC: string;
   [key: string]: any;
 }
 
 export interface SupplierProduct extends Product {
+  UPC: string;
   TPR?: string | number;
   BASE_UNIT_COST?: number;
   BASE_RETAIL?: number;
@@ -12,6 +12,7 @@ export interface SupplierProduct extends Product {
 export interface POSProduct extends Product {
     BASE_UNIT_COST?: number;
     BASE_RETAIL?: number;
+    Barcode: string;
 }
 
 export interface MatchedProduct {
