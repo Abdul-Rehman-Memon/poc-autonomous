@@ -1,10 +1,14 @@
-import React, { useState, useCallback, useMemo } from 'react';
-import { Upload, Download, FileSpreadsheet, CheckCircle } from 'lucide-react';
-import * as XLSX from 'xlsx';
-import type { SupplierProduct, POSProduct, MatchedProduct } from './core/interface';
-import CircularProgress from './components/CircleProgress';
-import { normalizeNumber } from './core/helper';
-
+import React, { useState, useCallback, useMemo } from "react";
+import { Upload, Download, FileSpreadsheet, CheckCircle } from "lucide-react";
+import * as XLSX from "xlsx";
+import type {
+  SupplierProduct,
+  POSProduct,
+  MatchedProduct,
+} from "./core/interface";
+import CircularProgress from "./components/CircleProgress";
+import { normalizeNumber } from "./core/helper";
+import ProgressModal from "./components/ProgressModal";
 
 const App: React.FC = () => {
   const [supplierFile, setSupplierFile] = useState<File | null>(null);
@@ -26,7 +30,7 @@ const App: React.FC = () => {
   ) => {
     let progress = 0;
     const increment = 100 / (duration / 50);
-    
+
     const interval = setInterval(() => {
       progress += increment + Math.random() * 5;
       if (progress >= 100) {
@@ -35,247 +39,279 @@ const App: React.FC = () => {
       }
       setProgress(Math.min(progress, 100));
     }, 50);
-    
+
     return interval;
   };
 
   // File upload handlers
-  const handleFileUpload = useCallback((file: File, type: 'supplier' | 'pos') => {
-    // Set uploading state and reset progress
-    if (type === 'supplier') {
-      setUploadingSupplier(true);
-      setSupplierProgress(0);
-    } else {
-      setUploadingPos(true);
-      setPosProgress(0);
-    }
-
-    // Start progress simulation
-    const progressInterval = simulateProgress(
-      type === 'supplier' ? setSupplierProgress : setPosProgress,
-      800
-    );
-
-    const reader = new FileReader();
-    
-    reader.onload = (e) => {
-      try {
-        const data = new Uint8Array(e.target?.result as ArrayBuffer);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet);
-
-        // Complete progress and finish upload
-        setTimeout(() => {
-          if (type === 'supplier') {
-            setSupplierProgress(100);
-            setTimeout(() => {
-              setSupplierData(jsonData as SupplierProduct[]);
-              setSupplierFile(file);
-              setUploadingSupplier(false);
-              setSupplierProgress(0);
-            }, 200);
-          } else {
-            setPosProgress(100);
-            setTimeout(() => {
-              setPosData(jsonData as POSProduct[]);
-              setPosFile(file);
-              setUploadingPos(false);
-              setPosProgress(0);
-            }, 200);
-          }
-        }, 300);
-      } catch (error) {
-        console.error('Error reading file:', error);
-        alert('Error reading file. Please ensure it\'s a valid Excel file.');
-        clearInterval(progressInterval);
-        if (type === 'supplier') {
-          setUploadingSupplier(false);
-          setSupplierProgress(0);
-        } else {
-          setUploadingPos(false);
-          setPosProgress(0);
-        }
-      }
-    };
-    
-    reader.onerror = () => {
-      alert('Error reading file. Please try again.');
-      clearInterval(progressInterval);
-      if (type === 'supplier') {
-        setUploadingSupplier(false);
+  const handleFileUpload = useCallback(
+    (file: File, type: "supplier" | "pos") => {
+      // Set uploading state and reset progress
+      if (type === "supplier") {
+        setUploadingSupplier(true);
         setSupplierProgress(0);
       } else {
-        setUploadingPos(false);
+        setUploadingPos(true);
         setPosProgress(0);
       }
-    };
-    
-    reader.readAsArrayBuffer(file);
-  }, []);
+
+      // Start progress simulation
+      const progressInterval = simulateProgress(
+        type === "supplier" ? setSupplierProgress : setPosProgress,
+        800
+      );
+
+      const reader = new FileReader();
+
+      reader.onload = (e) => {
+        try {
+          const data = new Uint8Array(e.target?.result as ArrayBuffer);
+          const workbook = XLSX.read(data, { type: "array" });
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+          // Complete progress and finish upload
+          setTimeout(() => {
+            switch (type) {
+              case "supplier":
+                setSupplierProgress(100);
+                setTimeout(() => {
+                  setSupplierData(jsonData as SupplierProduct[]);
+                  setSupplierFile(file);
+                  setUploadingSupplier(false);
+                  setSupplierProgress(0);
+                }, 200);
+                
+                break;
+              case "pos":
+                setPosProgress(100);
+                setTimeout(() => {
+                  setPosData(jsonData as POSProduct[]);
+                  setPosFile(file);
+                  setUploadingPos(false);
+                  setPosProgress(0);
+                }, 200);  
+                break;
+            
+            }
+          }, 300);
+        } catch (error) {
+          console.error("Error reading file:", error);
+          alert("Error reading file. Please ensure it's a valid Excel file.");
+          clearInterval(progressInterval);
+          switch (type) {
+            case "supplier":
+              setUploadingSupplier(false);
+              setSupplierProgress(0);
+              break;
+            case "pos":
+              setUploadingPos(false);
+              setPosProgress(0);
+              break;
+          }
+        }
+      };
+
+      reader.onerror = () => {
+        alert("Error reading file. Please try again.");
+        clearInterval(progressInterval);
+        switch (type) {
+          case "supplier":
+            setUploadingSupplier(false);
+            setSupplierProgress(0);
+            break;
+          case "pos":
+            setUploadingPos(false);
+            setPosProgress(0);
+            break;
+        }
+      };
+
+      reader.readAsArrayBuffer(file);
+    },
+    []
+  );
 
   // Process and match products
   const processProducts = useCallback(async () => {
     if (!supplierData.length || !posData.length) return;
-  
+
     setProcessing(true);
-  
+
     // Normalize UPCs and map supplier products
     const supplierMap = new Map<string, SupplierProduct>();
-    supplierData.forEach(product => {
+    supplierData.forEach((product) => {
       if (product.UPC !== undefined && product.UPC !== null) {
-        const normalizedUPC = normalizeNumber(product.UPC, 'supplier');
+        const normalizedUPC = normalizeNumber(product.UPC);
         supplierMap.set(normalizedUPC, product);
       }
     });
-  
+
     const matched: MatchedProduct[] = [];
-  
+
     const chunkSize = 1000;
     for (let i = 0; i < posData.length; i += chunkSize) {
       const chunk = posData.slice(i, i + chunkSize);
-  
-      chunk.forEach(posProduct => {
+
+      chunk.forEach((posProduct) => {
         if (posProduct.Barcode !== undefined && posProduct.Barcode !== null) {
-          const upc = normalizeNumber(String(posProduct.Barcode), 'pos')
+          const upc = normalizeNumber(String(posProduct.Barcode));
           const supplierProduct = supplierMap.get(upc);
-  
+
           if (supplierProduct) {
             const hasTpr = Boolean(
-              supplierProduct.TPR && String(supplierProduct.TPR).trim() !== ''
+              supplierProduct.TPR_RETAIL &&
+                String(supplierProduct.TPR_RETAIL).trim() !== ""
             );
             let priceUpdated = false;
             const updatedFields: string[] = [];
-  
-            const updatedPosProduct = { ...posProduct };
-  
+
+            const updatedProductPrices = { ...posProduct };
+
             if (!hasTpr) {
               if (
                 supplierProduct.BASE_UNIT_COST !== undefined &&
-                posProduct.BASE_UNIT_COST !== undefined &&
-                Number(supplierProduct.BASE_UNIT_COST) !== Number(posProduct.BASE_UNIT_COST)
+                posProduct.Cost !== undefined &&
+                Number(supplierProduct.BASE_UNIT_COST) !==
+                  Number(posProduct.Cost)
               ) {
-                updatedPosProduct.BASE_UNIT_COST = Number(supplierProduct.BASE_UNIT_COST);
+                console.log({supp:Number(supplierProduct.BASE_UNIT_COST),pos: Number(posProduct.Cost)})
+                updatedProductPrices.Cost = Number(supplierProduct.BASE_UNIT_COST);
+
                 priceUpdated = true;
-                updatedFields.push('BASE_UNIT_COST');
+                updatedFields.push("BASE_UNIT_COST");
               }
-  
+
               if (
                 supplierProduct.BASE_RETAIL !== undefined &&
-                posProduct.BASE_RETAIL !== undefined &&
-                Number(supplierProduct.BASE_RETAIL) !== Number(posProduct.BASE_RETAIL)
+                posProduct.Price !== undefined &&
+                Number(supplierProduct.BASE_RETAIL) !== Number(posProduct.Price)
               ) {
-                updatedPosProduct.BASE_RETAIL = Number(supplierProduct.BASE_RETAIL);
+                console.log({suppR:Number(supplierProduct.BASE_RETAIL),posR: Number(posProduct.Price)})
+                updatedProductPrices.Price = Number(supplierProduct.BASE_RETAIL);
                 priceUpdated = true;
-                updatedFields.push('BASE_RETAIL');
+                updatedFields.push("BASE_RETAIL");
               }
             }
-  
+
             matched.push({
               UPC: upc,
               supplier: supplierProduct,
-              pos: updatedPosProduct,
+              pos: posProduct,
+              updatedProductPrices,
               hasTpr,
               priceUpdated,
-              updatedFields
+              updatedFields,
             });
           }
         }
       });
-  
+
       // Let UI remain responsive
       if (i % (chunkSize * 5) === 0) {
-        await new Promise(resolve => setTimeout(resolve, 1));
+        await new Promise((resolve) => setTimeout(resolve, 1));
       }
     }
-  
+
     setMatchedProducts(matched);
     setStep(2);
     setProcessing(false);
   }, [supplierData, posData]);
-  
+
   // Filter products by TPR status
-  const tprProducts = useMemo(() => 
-    matchedProducts.filter(p => p.hasTpr), [matchedProducts]
+  const tprProducts = useMemo(
+    () => matchedProducts.filter((p) => p.hasTpr),
+    [matchedProducts]
   );
 
-  const nonTprProducts = useMemo(() => 
-    matchedProducts.filter(p => !p.hasTpr), [matchedProducts]
+  const nonTprProducts = useMemo(
+    () => matchedProducts.filter((p) => !p.hasTpr),
+    [matchedProducts]
   );
 
-  const updatedProducts = useMemo(() => 
-    nonTprProducts.filter(p => p.priceUpdated), [nonTprProducts]
+  const updatedProducts = useMemo(
+    () => nonTprProducts.filter((p) => p.priceUpdated),
+    [nonTprProducts]
   );
 
   // Download functions
-  const downloadData = useCallback((data: any[], filename: string, format: 'xlsx' | 'csv') => {
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Products');
-    
-    if (format === 'xlsx') {
-      XLSX.writeFile(wb, `${filename}.xlsx`);
-    } else {
-      const csv = XLSX.utils.sheet_to_csv(ws);
-      const blob = new Blob([csv], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${filename}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-    }
-  }, []);
+  const downloadData = useCallback(
+    (data: any[], filename: string, format: "xlsx" | "csv") => {
+      const ws = XLSX.utils.json_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Products");
 
-  const downloadTprProducts = useCallback((format: 'xlsx' | 'csv') => {
-    const data = tprProducts.map(p => {
-      // Start with all supplier columns
-      const result = { ...p.supplier };
-      
-      // Override BASE_UNIT_COST and BASE_RETAIL with POS values (which remain unchanged for TPR products)
-      result.BASE_UNIT_COST = p.pos.BASE_UNIT_COST;
-      result.BASE_RETAIL = p.pos.BASE_RETAIL;
-      
-      return result;
-    });
-    downloadData(data, 'tpr_products', format);
-  }, [tprProducts, downloadData]);
+      if (format === "xlsx") {
+        XLSX.writeFile(wb, `${filename}.xlsx`);
+      } else {
+        const csv = XLSX.utils.sheet_to_csv(ws);
+        const blob = new Blob([csv], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${filename}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    },
+    []
+  );
+
+  const downloadTprProducts = useCallback(
+    (format: "xlsx" | "csv") => {
+      const data = tprProducts.map((p) => {
+        // Start with all supplier columns
+        const result = { ...p.supplier };
+
+        // Override BASE_UNIT_COST and BASE_RETAIL with POS values (which remain unchanged for TPR products)
+        result.BASE_UNIT_COST = p.pos.BASE_UNIT_COST;
+        result.BASE_RETAIL = p.pos.BASE_RETAIL;
+
+        return result;
+      });
+      downloadData(data, "tpr_products", format);
+    },
+    [tprProducts, downloadData]
+  );
 
   // const downloadUpdatedProducts = useCallback((format: 'xlsx' | 'csv') => {
   //   const data = updatedProducts.map(p => {
   //     // Start with all supplier columns
   //     const result = { ...p.supplier };
-      
+
   //     // Override BASE_UNIT_COST and BASE_RETAIL with updated POS values
   //     result.BASE_UNIT_COST = p.pos.BASE_UNIT_COST;
   //     result.BASE_RETAIL = p.pos.BASE_RETAIL;
-      
+
   //     // Add metadata about updates
   //     result.UPDATED_FIELDS = p.updatedFields.join(', ');
-      
+
   //     return result;
   //   });
   //   downloadData(data, 'updated_products', format);
   // }, [updatedProducts, downloadData]);
 
-  const downloadNonTprProducts = useCallback((format: 'xlsx' | 'csv') => {
-    const data = nonTprProducts.map(p => {
-      // Start with all supplier columns
-      const result = { ...p.supplier };
-      
-      // Override BASE_UNIT_COST and BASE_RETAIL with POS values (updated or original)
-      result.BASE_UNIT_COST = p.pos.BASE_UNIT_COST;
-      result.BASE_RETAIL = p.pos.BASE_RETAIL;
-      
-      // Add metadata
-      result.STATUS = p.priceUpdated ? 'Updated' : 'No Change';
-      result.UPDATED_FIELDS = p.updatedFields.join(', ') || '-';
-      
-      return result;
-    });
-    downloadData(data, 'non_tpr_products', format);
-  }, [nonTprProducts, downloadData]);
+  const downloadNonTprProducts = useCallback(
+    (format: "xlsx" | "csv") => {
+      const data = nonTprProducts.map((p) => {
+        // Start with all supplier columns
+        const result = { ...p.supplier };
+
+        // Override BASE_UNIT_COST and BASE_RETAIL with POS values (updated or original)
+        result.BASE_UNIT_COST = p.pos.BASE_UNIT_COST;
+        result.BASE_RETAIL = p.pos.BASE_RETAIL;
+
+        // Add metadata
+        result.STATUS = p.priceUpdated ? "Updated" : "No Change";
+        result.UPDATED_FIELDS = p.updatedFields.join(", ") || "-";
+
+        return result;
+      });
+      downloadData(data, "non_tpr_products", format);
+    },
+    [nonTprProducts, downloadData]
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
@@ -285,7 +321,8 @@ const App: React.FC = () => {
             Supplier POS Comparison System
           </h1>
           <p className="text-gray-600">
-            Upload supplier and POS Excel files to compare and update product information
+            Upload supplier and POS Excel files to compare and update product
+            information
           </p>
         </div>
 
@@ -298,46 +335,75 @@ const App: React.FC = () => {
                 <FileSpreadsheet className="mr-2 text-green-600" />
                 Supplier File
               </h2>
-              <div className={`border-2 border-dashed rounded-lg p-6 text-center transition-all duration-300 ${
-                uploadingSupplier 
-                  ? 'border-green-400 bg-green-50' 
-                  : supplierFile 
-                    ? 'border-green-400 bg-green-50' 
-                    : 'border-gray-300 hover:border-green-400 hover:bg-green-50'
-              }`}>
+              <div
+                className={`border-2 border-dashed rounded-lg p-6 text-center transition-all duration-300 ${
+                  uploadingSupplier
+                    ? "border-green-400 bg-green-50"
+                    : supplierFile
+                    ? "border-green-400 bg-green-50"
+                    : "border-gray-300 hover:border-green-400 hover:bg-green-50"
+                }`}
+              >
                 <input
                   type="file"
                   accept=".xlsx,.xls"
-                  onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0], 'supplier')}
+                  onChange={(e) =>
+                    e.target.files?.[0] &&
+                    handleFileUpload(e.target.files[0], "supplier")
+                  }
                   className="hidden"
                   id="supplier-upload"
                   disabled={uploadingSupplier}
                 />
-                <label htmlFor="supplier-upload" className={`cursor-pointer ${uploadingSupplier ? 'pointer-events-none' : ''}`}>
+                <label
+                  htmlFor="supplier-upload"
+                  className={`cursor-pointer ${
+                    uploadingSupplier ? "pointer-events-none" : ""
+                  }`}
+                >
                   {uploadingSupplier ? (
                     <div className="flex flex-col items-center">
-                      <CircularProgress progress={supplierProgress} color="green" />
+                      <CircularProgress
+                        progress={supplierProgress}
+                        color="green"
+                      />
                       <p className="text-green-600 font-medium">Uploading...</p>
-                      <p className="text-sm text-green-500 mt-1">Processing supplier file</p>
+                      <p className="text-sm text-green-500 mt-1">
+                        Processing supplier file
+                      </p>
                     </div>
                   ) : supplierFile ? (
                     <div className="flex flex-col items-center">
                       <CheckCircle className="text-green-600 mb-2" size={48} />
-                      <p className="text-green-600 font-medium">File uploaded successfully!</p>
-                      <p className="text-sm text-green-500 mt-1">Click to upload a different file</p>
+                      <p className="text-green-600 font-medium">
+                        File uploaded successfully!
+                      </p>
+                      <p className="text-sm text-green-500 mt-1">
+                        Click to upload a different file
+                      </p>
                     </div>
                   ) : (
                     <div>
-                      <Upload className="mx-auto mb-2 text-gray-400 transition-colors group-hover:text-green-500" size={48} />
-                      <p className="text-gray-600">Click to upload supplier Excel file</p>
-                      <p className="text-sm text-gray-400 mt-1">Up to 40K products supported</p>
+                      <Upload
+                        className="mx-auto mb-2 text-gray-400 transition-colors group-hover:text-green-500"
+                        size={48}
+                      />
+                      <p className="text-gray-600">
+                        Click to upload supplier Excel file
+                      </p>
+                      <p className="text-sm text-gray-400 mt-1">
+                        Up to 40K products supported
+                      </p>
                     </div>
                   )}
                 </label>
               </div>
               {supplierFile && !uploadingSupplier && (
                 <div className="mt-4 p-3 bg-green-50 rounded-lg flex items-center animate-fade-in">
-                  <CheckCircle className="text-green-600 mr-2 animate-bounce" size={20} />
+                  <CheckCircle
+                    className="text-green-600 mr-2 animate-bounce"
+                    size={20}
+                  />
                   <span className="text-green-800">
                     {supplierFile.name} ({supplierData.length} products)
                   </span>
@@ -351,46 +417,72 @@ const App: React.FC = () => {
                 <FileSpreadsheet className="mr-2 text-blue-600" />
                 POS File
               </h2>
-              <div className={`border-2 border-dashed rounded-lg p-6 text-center transition-all duration-300 ${
-                uploadingPos 
-                  ? 'border-blue-400 bg-blue-50' 
-                  : posFile 
-                    ? 'border-blue-400 bg-blue-50' 
-                    : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50'
-              }`}>
+              <div
+                className={`border-2 border-dashed rounded-lg p-6 text-center transition-all duration-300 ${
+                  uploadingPos
+                    ? "border-blue-400 bg-blue-50"
+                    : posFile
+                    ? "border-blue-400 bg-blue-50"
+                    : "border-gray-300 hover:border-blue-400 hover:bg-blue-50"
+                }`}
+              >
                 <input
                   type="file"
                   accept=".xlsx,.xls"
-                  onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0], 'pos')}
+                  onChange={(e) =>
+                    e.target.files?.[0] &&
+                    handleFileUpload(e.target.files[0], "pos")
+                  }
                   className="hidden"
                   id="pos-upload"
                   disabled={uploadingPos}
                 />
-                <label htmlFor="pos-upload" className={`cursor-pointer ${uploadingPos ? 'pointer-events-none' : ''}`}>
+                <label
+                  htmlFor="pos-upload"
+                  className={`cursor-pointer ${
+                    uploadingPos ? "pointer-events-none" : ""
+                  }`}
+                >
                   {uploadingPos ? (
                     <div className="flex flex-col items-center">
                       <CircularProgress progress={posProgress} color="blue" />
                       <p className="text-blue-600 font-medium">Uploading...</p>
-                      <p className="text-sm text-blue-500 mt-1">Processing POS file</p>
+                      <p className="text-sm text-blue-500 mt-1">
+                        Processing POS file
+                      </p>
                     </div>
                   ) : posFile ? (
                     <div className="flex flex-col items-center">
                       <CheckCircle className="text-blue-600 mb-2" size={48} />
-                      <p className="text-blue-600 font-medium">File uploaded successfully!</p>
-                      <p className="text-sm text-blue-500 mt-1">Click to upload a different file</p>
+                      <p className="text-blue-600 font-medium">
+                        File uploaded successfully!
+                      </p>
+                      <p className="text-sm text-blue-500 mt-1">
+                        Click to upload a different file
+                      </p>
                     </div>
                   ) : (
                     <div>
-                      <Upload className="mx-auto mb-2 text-gray-400 transition-colors group-hover:text-blue-500" size={48} />
-                      <p className="text-gray-600">Click to upload POS Excel file</p>
-                      <p className="text-sm text-gray-400 mt-1">Up to 40K products supported</p>
+                      <Upload
+                        className="mx-auto mb-2 text-gray-400 transition-colors group-hover:text-blue-500"
+                        size={48}
+                      />
+                      <p className="text-gray-600">
+                        Click to upload POS Excel file
+                      </p>
+                      <p className="text-sm text-gray-400 mt-1">
+                        Up to 40K products supported
+                      </p>
                     </div>
                   )}
                 </label>
               </div>
               {posFile && !uploadingPos && (
                 <div className="mt-4 p-3 bg-blue-50 rounded-lg flex items-center animate-fade-in">
-                  <CheckCircle className="text-blue-600 mr-2 animate-bounce" size={20} />
+                  <CheckCircle
+                    className="text-blue-600 mr-2 animate-bounce"
+                    size={20}
+                  />
                   <span className="text-blue-800">
                     {posFile.name} ({posData.length} products)
                   </span>
@@ -408,7 +500,7 @@ const App: React.FC = () => {
               disabled={processing}
               className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white px-8 py-3 rounded-lg font-semibold transition-colors"
             >
-              {processing ? 'Processing...' : 'Compare Products'}
+              {processing ? "Processing..." : "Compare Products"}
             </button>
           </div>
         )}
@@ -419,20 +511,34 @@ const App: React.FC = () => {
             {/* Summary Cards */}
             <div className="grid md:grid-cols-4 gap-4">
               <div className="bg-white rounded-lg shadow p-4">
-                <h3 className="text-sm font-medium text-gray-500">Total Matched</h3>
-                <p className="text-2xl font-bold text-blue-600">{matchedProducts.length}</p>
+                <h3 className="text-sm font-medium text-gray-500">
+                  Total Matched
+                </h3>
+                <p className="text-2xl font-bold text-blue-600">
+                  {matchedProducts.length}
+                </p>
               </div>
               <div className="bg-white rounded-lg shadow p-4">
                 <h3 className="text-sm font-medium text-gray-500">With TPR</h3>
-                <p className="text-2xl font-bold text-green-600">{tprProducts.length}</p>
+                <p className="text-2xl font-bold text-green-600">
+                  {tprProducts.length}
+                </p>
               </div>
               <div className="bg-white rounded-lg shadow p-4">
-                <h3 className="text-sm font-medium text-gray-500">Without TPR</h3>
-                <p className="text-2xl font-bold text-orange-600">{nonTprProducts.length}</p>
+                <h3 className="text-sm font-medium text-gray-500">
+                  Without TPR
+                </h3>
+                <p className="text-2xl font-bold text-orange-600">
+                  {nonTprProducts.length}
+                </p>
               </div>
               <div className="bg-white rounded-lg shadow p-4">
-                <h3 className="text-sm font-medium text-gray-500">Price Updated</h3>
-                <p className="text-2xl font-bold text-purple-600">{updatedProducts.length}</p>
+                <h3 className="text-sm font-medium text-gray-500">
+                  Price Updated
+                </h3>
+                <p className="text-2xl font-bold text-purple-600">
+                  {updatedProducts.length}
+                </p>
               </div>
             </div>
 
@@ -446,14 +552,14 @@ const App: React.FC = () => {
                     </h2>
                     <div className="flex space-x-2">
                       <button
-                        onClick={() => downloadTprProducts('xlsx')}
+                        onClick={() => downloadTprProducts("xlsx")}
                         className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm flex items-center"
                       >
                         <Download className="mr-1" size={16} />
                         Download XLSX
                       </button>
                       <button
-                        onClick={() => downloadTprProducts('csv')}
+                        onClick={() => downloadTprProducts("csv")}
                         className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm flex items-center"
                       >
                         <Download className="mr-1" size={16} />
@@ -467,23 +573,35 @@ const App: React.FC = () => {
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50 sticky top-0">
                         <tr>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">UPC</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">TPR</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier BASE_UNIT_COST</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier BASE_RETAIL</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">POS BASE_UNIT_COST</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">POS BASE_RETAIL</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            UPC
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          TPR_RETAIL
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          TPR_TYPE
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          CATEGORY DESCRIPTION
+                          </th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
                         {tprProducts.map((product, index) => (
                           <tr key={index} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.UPC}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-green-600 font-medium">{product.supplier.TPR}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.supplier.BASE_UNIT_COST || '-'}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.supplier.BASE_RETAIL || '-'}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.pos.BASE_UNIT_COST || '-'}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.pos.BASE_RETAIL || '-'}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                              {product.UPC}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-green-600 font-medium">
+                              {product.supplier.TPR_RETAIL || '-'}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                              {product.supplier.TPR_TYPE || "-"}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                              {product.supplier.CATEGORY_DESCRIPTION || "-"}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -506,14 +624,14 @@ const App: React.FC = () => {
                     </h2>
                     <div className="flex space-x-2">
                       <button
-                        onClick={() => downloadNonTprProducts('xlsx')}
+                        onClick={() => downloadNonTprProducts("xlsx")}
                         className="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg text-sm flex items-center"
                       >
                         <Download className="mr-1" size={16} />
                         Download XLSX
                       </button>
                       <button
-                        onClick={() => downloadNonTprProducts('csv')}
+                        onClick={() => downloadNonTprProducts("csv")}
                         className="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg text-sm flex items-center"
                       >
                         <Download className="mr-1" size={16} />
@@ -527,19 +645,35 @@ const App: React.FC = () => {
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50 sticky top-0">
                         <tr>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">UPC</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Updated Fields</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier BASE_UNIT_COST</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">POS BASE_UNIT_COST</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier BASE_RETAIL</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">POS BASE_RETAIL</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            UPC
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Status
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Updated Fields
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Supplier BASE_UNIT_COST
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            POS BASE_UNIT_COST
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Supplier BASE_RETAIL
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            POS BASE_RETAIL
+                          </th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
                         {nonTprProducts.map((product, index) => (
                           <tr key={index} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.UPC}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                              {product.UPC}
+                            </td>
                             <td className="px-4 py-3 whitespace-nowrap text-sm">
                               {product.priceUpdated ? (
                                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
@@ -552,19 +686,30 @@ const App: React.FC = () => {
                               )}
                             </td>
                             <td className="px-4 py-3 whitespace-nowrap text-sm text-purple-600 font-medium">
-                              {product.updatedFields.length > 0 ? product.updatedFields.join(', ') : '-'}
+                              {product.updatedFields.length > 0
+                                ? product.updatedFields.join(", ")
+                                : "-"}
                             </td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.supplier.BASE_UNIT_COST || '-'}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.pos.BASE_UNIT_COST || '-'}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.supplier.BASE_RETAIL || '-'}</td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{product.pos.BASE_RETAIL || '-'}</td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                              {product.supplier.BASE_UNIT_COST || "-"}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                              {product.pos.Cost || "-"}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                              {product.supplier.BASE_RETAIL || "-"}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                              {product.pos.Price || "-"}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
                   <div className="mt-2 text-sm text-gray-500 text-center">
-                    Showing all {nonTprProducts.length} products without TPR ({updatedProducts.length} updated)
+                    Showing all {nonTprProducts.length} products without TPR (
+                    {updatedProducts.length} updated)
                   </div>
                 </div>
               </div>
@@ -589,17 +734,7 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {processing && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-6 max-w-sm w-full mx-4">
-              <div className="text-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
-                <h3 className="text-lg font-semibold text-gray-800 mb-2">Processing Products</h3>
-                <p className="text-gray-600">This may take a moment for large datasets...</p>
-              </div>
-            </div>
-          </div>
-        )}
+        {processing && <ProgressModal />}
       </div>
     </div>
   );
