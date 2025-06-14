@@ -5,6 +5,7 @@ import type {
   SupplierProduct,
   POSProduct,
   MatchedProduct,
+  SheetData,
 } from "./core/interface";
 import CircularProgress from "./components/CircleProgress";
 import { normalizeNumber } from "./core/helper";
@@ -69,7 +70,26 @@ const App: React.FC = () => {
           const workbook = XLSX.read(data, { type: "array" });
           const sheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[sheetName];
-          const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+          // Get header row (first row) manually
+          const range = XLSX.utils.decode_range(worksheet["!ref"]!);
+          const headers: string[] = [];
+
+          for (let col = range.s.c; col <= range.e.c; ++col) {
+            const cellAddress = XLSX.utils.encode_cell({
+              r: range.s.r,
+              c: col,
+            });
+            const cell = worksheet[cellAddress];
+            headers.push(cell ? String(cell.v).trim() : `UNKNOWN_${col}`);
+          }
+
+          // Parse with headers and include empty cells (defval sets empty to null or '')
+          const jsonData = XLSX.utils.sheet_to_json(worksheet, {
+            header: headers,
+            defval: "", // or use null to keep actual nulls
+            range: range.s.r + 1, // Skip header row (already passed in `header`)
+          });
 
           // Complete progress and finish upload
           setTimeout(() => {
@@ -82,7 +102,7 @@ const App: React.FC = () => {
                   setUploadingSupplier(false);
                   setSupplierProgress(0);
                 }, 200);
-                
+
                 break;
               case "pos":
                 setPosProgress(100);
@@ -91,9 +111,8 @@ const App: React.FC = () => {
                   setPosFile(file);
                   setUploadingPos(false);
                   setPosProgress(0);
-                }, 200);  
+                }, 200);
                 break;
-            
             }
           }, 300);
         } catch (error) {
@@ -158,7 +177,6 @@ const App: React.FC = () => {
         if (posProduct.Barcode !== undefined && posProduct.Barcode !== null) {
           const upc = normalizeNumber(String(posProduct.Barcode));
           const supplierProduct = supplierMap.get(upc);
-
           if (supplierProduct) {
             const hasTpr = Boolean(
               supplierProduct.TPR_RETAIL &&
@@ -176,8 +194,9 @@ const App: React.FC = () => {
                 Number(supplierProduct.BASE_UNIT_COST) !==
                   Number(posProduct.Cost)
               ) {
-                console.log({supp:Number(supplierProduct.BASE_UNIT_COST),pos: Number(posProduct.Cost)})
-                updatedProductPrices.Cost = Number(supplierProduct.BASE_UNIT_COST);
+                updatedProductPrices.Cost = Number(
+                  supplierProduct.BASE_UNIT_COST
+                );
 
                 priceUpdated = true;
                 updatedFields.push("BASE_UNIT_COST");
@@ -188,8 +207,9 @@ const App: React.FC = () => {
                 posProduct.Price !== undefined &&
                 Number(supplierProduct.BASE_RETAIL) !== Number(posProduct.Price)
               ) {
-                console.log({suppR:Number(supplierProduct.BASE_RETAIL),posR: Number(posProduct.Price)})
-                updatedProductPrices.Price = Number(supplierProduct.BASE_RETAIL);
+                updatedProductPrices.Price = Number(
+                  supplierProduct.BASE_RETAIL
+                );
                 priceUpdated = true;
                 updatedFields.push("BASE_RETAIL");
               }
@@ -235,17 +255,27 @@ const App: React.FC = () => {
     [nonTprProducts]
   );
 
-  // Download functions
   const downloadData = useCallback(
-    (data: any[], filename: string, format: "xlsx" | "csv") => {
-      const ws = XLSX.utils.json_to_sheet(data);
+    (
+      sheets: [SheetData, SheetData?], // first required, second optional
+      filename: string,
+      format: "xlsx" | "csv"
+    ) => {
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Products");
+
+      sheets.forEach((sheet) => {
+        if (!sheet) return; // Safeguard for optional second sheet
+        const ws = XLSX.utils.json_to_sheet(sheet.data);
+        XLSX.utils.book_append_sheet(wb, ws, sheet.sheetName);
+      });
 
       if (format === "xlsx") {
         XLSX.writeFile(wb, `${filename}.xlsx`);
       } else {
-        const csv = XLSX.utils.sheet_to_csv(ws);
+        const [firstSheet] = sheets;
+        const csv = XLSX.utils.sheet_to_csv(
+          XLSX.utils.json_to_sheet(firstSheet.data)
+        );
         const blob = new Blob([csv], { type: "text/csv" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -257,58 +287,67 @@ const App: React.FC = () => {
     },
     []
   );
-
   const downloadTprProducts = useCallback(
     (format: "xlsx" | "csv") => {
       const data = tprProducts.map((p) => {
         // Start with all supplier columns
         const result = { ...p.supplier };
 
-        // Override BASE_UNIT_COST and BASE_RETAIL with POS values (which remain unchanged for TPR products)
-        result.BASE_UNIT_COST = p.pos.BASE_UNIT_COST;
-        result.BASE_RETAIL = p.pos.BASE_RETAIL;
-
         return result;
       });
-      downloadData(data, "tpr_products", format);
+      downloadData(
+        [
+          {
+            sheetName: "TPR Products",
+            data,
+          },
+        ],
+        "tpr_products",
+        format
+      );
     },
     [tprProducts, downloadData]
   );
 
-  // const downloadUpdatedProducts = useCallback((format: 'xlsx' | 'csv') => {
-  //   const data = updatedProducts.map(p => {
-  //     // Start with all supplier columns
-  //     const result = { ...p.supplier };
-
-  //     // Override BASE_UNIT_COST and BASE_RETAIL with updated POS values
-  //     result.BASE_UNIT_COST = p.pos.BASE_UNIT_COST;
-  //     result.BASE_RETAIL = p.pos.BASE_RETAIL;
-
-  //     // Add metadata about updates
-  //     result.UPDATED_FIELDS = p.updatedFields.join(', ');
-
-  //     return result;
-  //   });
-  //   downloadData(data, 'updated_products', format);
-  // }, [updatedProducts, downloadData]);
-
   const downloadNonTprProducts = useCallback(
     (format: "xlsx" | "csv") => {
       const data = nonTprProducts.map((p) => {
-        // Start with all supplier columns
-        const result = { ...p.supplier };
-
-        // Override BASE_UNIT_COST and BASE_RETAIL with POS values (updated or original)
-        result.BASE_UNIT_COST = p.pos.BASE_UNIT_COST;
-        result.BASE_RETAIL = p.pos.BASE_RETAIL;
-
-        // Add metadata
-        result.STATUS = p.priceUpdated ? "Updated" : "No Change";
-        result.UPDATED_FIELDS = p.updatedFields.join(", ") || "-";
+        const result = {
+          STATUS: p.priceUpdated ? "Updated" : "No Change",
+          UPDATED_FIELDS: p.updatedFields.join(", ") || "-",
+          ...p.supplier,
+          ...p.pos,
+        };
 
         return result;
       });
-      downloadData(data, "non_tpr_products", format);
+
+      const matchedData = nonTprProducts
+        .filter((p) => p.priceUpdated)
+        .map((p) => {
+          const result = {
+            STATUS: "Updated",
+            UPDATED_FIELDS: p.updatedFields.join(", ") || "-",
+            ...p.supplier,
+            ...p.pos,
+          };
+          return result;
+        });
+
+      downloadData(
+        [
+          {
+            sheetName: "Non-TPR Products Filtered",
+            data: matchedData,
+          },
+          {
+            sheetName: "Non-TPR Products",
+            data,
+          },
+        ],
+        "non_tpr_products",
+        format
+      );
     },
     [nonTprProducts, downloadData]
   );
@@ -577,13 +616,13 @@ const App: React.FC = () => {
                             UPC
                           </th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          TPR_RETAIL
+                            TPR_RETAIL
                           </th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          TPR_TYPE
+                            TPR_TYPE
                           </th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          CATEGORY DESCRIPTION
+                            CATEGORY DESCRIPTION
                           </th>
                         </tr>
                       </thead>
@@ -594,7 +633,7 @@ const App: React.FC = () => {
                               {product.UPC}
                             </td>
                             <td className="px-4 py-3 whitespace-nowrap text-sm text-green-600 font-medium">
-                              {product.supplier.TPR_RETAIL || '-'}
+                              {product.supplier.TPR_RETAIL || "-"}
                             </td>
                             <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
                               {product.supplier.TPR_TYPE || "-"}

@@ -75,7 +75,6 @@ export interface SupplierProduct extends Product {
   SPEC_DATE?: string;
 }
 
-
 export interface POSProduct extends Product {
   Barcode: string;
   Cost?: number;
@@ -105,7 +104,7 @@ export interface MatchedProduct {
   pos: POSProduct;
   hasTpr: boolean;
   priceUpdated: boolean;
-  updatedProductPrices: any,
+  updatedProductPrices: any;
   updatedFields: string[];
 }
 
@@ -113,3 +112,8 @@ export interface CircularProgressProps {
   progress: number;
   color: string; // Optional color prop with default value
 }
+
+export type SheetData = {
+  sheetName: string;
+  data: any[];
+};
