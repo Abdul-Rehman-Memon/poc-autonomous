@@ -153,91 +153,110 @@ const App: React.FC = () => {
   );
 
   // Process and match products
-  const processProducts = useCallback(async () => {
-    if (!supplierData.length || !posData.length) return;
 
-    setProcessing(true);
+  const processProducts = useCallback(
+    async (filter: "cost" | "retail" | "all" = "all") => {
+      if (!supplierData.length || !posData.length) return;
 
-    // Normalize UPCs and map supplier products
-    const supplierMap = new Map<string, SupplierProduct>();
-    supplierData.forEach((product) => {
-      if (product.UPC !== undefined && product.UPC !== null) {
-        const normalizedUPC = normalizeNumber(product.UPC);
-        supplierMap.set(normalizedUPC, product);
-      }
-    });
+      setProcessing(true);
 
-    const matched: MatchedProduct[] = [];
-
-    const chunkSize = 1000;
-    for (let i = 0; i < posData.length; i += chunkSize) {
-      const chunk = posData.slice(i, i + chunkSize);
-
-      chunk.forEach((posProduct) => {
-        if (posProduct.Barcode !== undefined && posProduct.Barcode !== null) {
-          const upc = normalizeNumber(String(posProduct.Barcode));
-          const supplierProduct = supplierMap.get(upc);
-          if (supplierProduct) {
-            const hasTpr = Boolean(
-              supplierProduct.TPR_RETAIL &&
-                String(supplierProduct.TPR_RETAIL).trim() !== ""
-            );
-            let priceUpdated = false;
-            const updatedFields: string[] = [];
-
-            const updatedProductPrices = { ...posProduct };
-
-            if (!hasTpr) {
-              if (
-                supplierProduct.BASE_UNIT_COST !== undefined &&
-                posProduct.Cost !== undefined &&
-                Number(supplierProduct.BASE_UNIT_COST) !==
-                  Number(posProduct.Cost)
-              ) {
-                updatedProductPrices.Cost = Number(
-                  supplierProduct.BASE_UNIT_COST
-                );
-
-                priceUpdated = true;
-                updatedFields.push("BASE_UNIT_COST");
-              }
-
-              if (
-                supplierProduct.BASE_RETAIL !== undefined &&
-                posProduct.Price !== undefined &&
-                Number(supplierProduct.BASE_RETAIL) !== Number(posProduct.Price)
-              ) {
-                updatedProductPrices.Price = Number(
-                  supplierProduct.BASE_RETAIL
-                );
-                priceUpdated = true;
-                updatedFields.push("BASE_RETAIL");
-              }
-            }
-
-            matched.push({
-              UPC: upc,
-              supplier: supplierProduct,
-              pos: posProduct,
-              updatedProductPrices,
-              hasTpr,
-              priceUpdated,
-              updatedFields,
-            });
-          }
+      // Normalize UPCs and map supplier products
+      const supplierMap = new Map<string, SupplierProduct>();
+      supplierData.forEach((product) => {
+        if (product.UPC !== undefined && product.UPC !== null) {
+          const normalizedUPC = normalizeNumber(product.UPC);
+          supplierMap.set(normalizedUPC, product);
         }
       });
 
-      // Let UI remain responsive
-      if (i % (chunkSize * 5) === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 1));
-      }
-    }
+      const matched: MatchedProduct[] = [];
+      const nonTpr: MatchedProduct[] = [];
 
-    setMatchedProducts(matched);
-    setStep(2);
-    setProcessing(false);
-  }, [supplierData, posData]);
+      const chunkSize = 1000;
+
+      for (let i = 0; i < posData.length; i += chunkSize) {
+        const chunk = posData.slice(i, i + chunkSize);
+
+        chunk.forEach((posProduct) => {
+          if (posProduct.Barcode !== undefined && posProduct.Barcode !== null) {
+            const upc = normalizeNumber(String(posProduct.Barcode));
+            const supplierProduct = supplierMap.get(upc);
+            if (supplierProduct) {
+              const hasTpr = Boolean(
+                supplierProduct.TPR_RETAIL &&
+                  String(supplierProduct.TPR_RETAIL).trim() !== ""
+              );
+
+              let priceUpdated = false;
+              const updatedFields: string[] = [];
+              const updatedProductPrices = { ...posProduct };
+
+              // Apply filters
+              const checkCost = filter === "cost" || filter === "all";
+              const checkRetail = filter === "retail" || filter === "all";
+
+              if (!hasTpr) {
+                if (
+                  checkCost &&
+                  supplierProduct.BASE_UNIT_COST !== undefined &&
+                  posProduct.Cost !== undefined &&
+                  Number(supplierProduct.BASE_UNIT_COST) !==
+                    Number(posProduct.Cost)
+                ) {
+                  updatedProductPrices.Cost = Number(
+                    supplierProduct.BASE_UNIT_COST
+                  );
+                  priceUpdated = true;
+                  updatedFields.push("BASE_UNIT_COST");
+                }
+
+                if (
+                  checkRetail &&
+                  supplierProduct.BASE_RETAIL !== undefined &&
+                  posProduct.Price !== undefined &&
+                  Number(supplierProduct.BASE_RETAIL) !==
+                    Number(posProduct.Price)
+                ) {
+                  updatedProductPrices.Price = Number(
+                    supplierProduct.BASE_RETAIL
+                  );
+                  priceUpdated = true;
+                  updatedFields.push("BASE_RETAIL");
+                }
+              }
+
+              const matchedProduct: MatchedProduct = {
+                UPC: upc,
+                supplier: supplierProduct,
+                pos: posProduct,
+                updatedProductPrices,
+                hasTpr,
+                priceUpdated,
+                updatedFields,
+              };
+
+              matched.push(matchedProduct);
+
+              // Store non-TPR products that are price-updated
+              if (!hasTpr && priceUpdated) {
+                nonTpr.push(matchedProduct);
+              }
+            }
+          }
+        });
+
+        // Keep UI responsive
+        if (i % (chunkSize * 5) === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 1));
+        }
+      }
+
+      setMatchedProducts(matched);
+      setStep(2);
+      setProcessing(false);
+    },
+    [supplierData, posData]
+  );
 
   // Filter products by TPR status
   const tprProducts = useMemo(
@@ -535,7 +554,7 @@ const App: React.FC = () => {
         {step === 1 && supplierData.length > 0 && posData.length > 0 && (
           <div className="text-center mb-6">
             <button
-              onClick={processProducts}
+              onClick={() => processProducts()}
               disabled={processing}
               className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white px-8 py-3 rounded-lg font-semibold transition-colors"
             >
@@ -661,7 +680,26 @@ const App: React.FC = () => {
                     <h2 className="text-xl font-semibold text-gray-800">
                       Products without TPR ({nonTprProducts.length})
                     </h2>
-                    <div className="flex space-x-2">
+                    <div className="flex space-x-2 ">
+                      <div className="mb-4 flex items-center space-x-2">
+                        <label htmlFor="filter" className="font-medium">
+                          Show:
+                        </label>
+                        <select
+                          id="filter"
+                          className="border px-4 py-2 rounded-lg text-sm flex items-center"
+                          onChange={(e) =>
+                            processProducts(
+                              e.target.value as "cost" | "retail" | "all"
+                            )
+                          }
+                        >
+                          <option value="all">All Products</option>
+                          <option value="cost">Only Cost‑Changed</option>
+                          <option value="retail">Only Retail‑Changed</option>
+                        </select>
+                      </div>
+
                       <button
                         onClick={() => downloadNonTprProducts("xlsx")}
                         className="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg text-sm flex items-center"
