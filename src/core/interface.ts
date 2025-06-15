@@ -117,3 +117,29 @@ export type SheetData = {
   sheetName: string;
   data: any[];
 };
+
+export interface ProductData {
+  [key: string]: any;
+  // Common fields
+  DESCRIPTION?: string;
+  UPC?: string;
+  BASE_RETAIL?: number;
+  TPR_RETAIL?: number;
+  TPR_INDICATOR?: string;
+  PACK_SIZE?: string;
+  // For mapping
+  "Item Name"?: string;
+  Price?: number;
+  Code?: string;
+  Barcode?: string;
+}
+
+export interface LabelData {
+  id: string;
+  description: string;
+  price: string;
+  originalPrice?: string;
+  upc: string;
+  isTpr: boolean;
+  selected: boolean;
+}
