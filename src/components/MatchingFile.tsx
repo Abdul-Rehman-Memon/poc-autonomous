@@ -152,6 +152,51 @@ const MatchingFile: React.FC = () => {
     []
   );
 
+  // 101 Files download handler
+  const downloadTextFile = (
+    products: MatchedProduct[],
+    type: "tpr" | "non-tpr"
+  ) => {
+    const header =
+      "(Serial no) - (zone) - (upc) -             iten#  dept    item discription\t\t     pk\t\t\tsize\t\tcase cost\treg price tag date\t     TPR  date on\t\tdate off";
+
+    const lines = products.map((p, i) => {
+      const s = p.supplier;
+
+      const serial = String(i + 1).padStart(5, "0");
+      const zone = "(72)2510000";
+      const upc = `(01)${p.UPC || s.Barcode || ""}`;
+      const unknown = "(73)2(03)000000";
+
+      const desc = `(04)${(s.DESCRIPTION || "").padEnd(30, " ")}`;
+      const pack = `(05)${String(s.PACK || "").padStart(4, " ")}`;
+      const size = `(06)${String(s.SIZE || "").padStart(7, " ")}`;
+      const cost = `(52)${String(s.BASE_UNIT_COST || "").padStart(8, " ")}`;
+      const price = `(55)${String(s.BASE_RETAIL || "").padStart(8, " ")}`;
+      const tagDate = `(51)${s.RECORD_STATUS_DATE || "------"}`;
+
+      const tpr = s.TPR_RETAIL
+        ? `(57)${String(s.TPR_RETAIL).padStart(8, " ")}`
+        : "";
+      const dateOn = s.TPR_EFFECTIVE_DATE ? `(58)${s.TPR_EFFECTIVE_DATE}` : "";
+      const dateOff = s.TPR_END_DATE ? `(59)${s.TPR_END_DATE}` : "";
+
+      return `${serial}${zone}${upc}${unknown} ${desc}${pack}${size}${cost}${price}${tagDate} ${tpr} ${dateOn} ${dateOff}`.trim();
+    });
+
+    const fullText = `${
+      lines[0] ? lines[0].replace(/^\d+/, "00001") : ""
+    }\n${header}\n${lines.slice(1).join("\n")}`;
+
+    const blob = new Blob([fullText], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${type}_filtered_products.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   // Process and match products
 
   const processProducts = useCallback(
@@ -610,6 +655,13 @@ const MatchingFile: React.FC = () => {
                     </h2>
                     <div className="flex space-x-2">
                       <button
+                        onClick={() => downloadTextFile(tprProducts, "tpr")}
+                        className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm flex items-center"
+                      >
+                        <Download className="mr-1" size={16} />
+                        Download 101 File
+                      </button>
+                      <button
                         onClick={() => downloadTprProducts("xlsx")}
                         className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm flex items-center"
                       >
@@ -700,6 +752,18 @@ const MatchingFile: React.FC = () => {
                         </select>
                       </div>
 
+                      <button
+                        onClick={() =>
+                          downloadTextFile(
+                            nonTprProducts.filter((p) => p.priceUpdated),
+                            "non-tpr"
+                          )
+                        }
+                        className="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg text-sm flex items-center"
+                      >
+                        <Download className="mr-1" size={16} />
+                        Download 101 File
+                      </button>
                       <button
                         onClick={() => downloadNonTprProducts("xlsx")}
                         className="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg text-sm flex items-center"
