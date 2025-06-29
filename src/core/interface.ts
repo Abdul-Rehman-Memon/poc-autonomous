@@ -142,4 +142,5 @@ export interface LabelData {
   upc: string;
   isTpr: boolean;
   selected: boolean;
+  originalDetails?: ProductData;
 }

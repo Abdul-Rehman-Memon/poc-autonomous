@@ -1,8 +1,3 @@
-// const LabelGeneration = () => {
-//   return <div>LabelGeneration</div>;
-// };
-
-// export default LabelGeneration;
 import React, { useState, useRef } from "react";
 import {
   Upload,
@@ -16,6 +11,8 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import type { LabelData, ProductData } from "../core/interface";
+import NONTPRLabel from "./NONTPRLabel";
+import TPRLabel from "./TPRLabel";
 
 const LabelGeneration: React.FC = () => {
   const [excelData, setExcelData] = useState<ProductData[]>([]);
@@ -55,8 +52,11 @@ const LabelGeneration: React.FC = () => {
           upc: getUPC(item),
           isTpr,
           selected: false,
+          originalDetails: item,
         };
       });
+
+      console.log({ labelData: labelData[0].originalDetails });
 
       setLabels(labelData);
       setSelectedLabels(new Set()); // Reset selection
@@ -137,22 +137,22 @@ const LabelGeneration: React.FC = () => {
       <head>
         <title>Labels - ${new Date().toLocaleDateString()}</title>
         <style>
-          * { 
-            margin: 0; 
-            padding: 0; 
-            box-sizing: border-box; 
+          * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
           }
-          
-          body { 
-            font-family: 'Arial', sans-serif; 
+
+          body {
+            font-family: 'Arial', sans-serif;
             background: white;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
           }
-          
-          .page { 
-            width: 8.5in; 
-            height: 11in; 
+
+          .page {
+            width: 8.5in;
+            height: 11in;
             display: grid;
             grid-template-columns: repeat(5, 1fr);
             grid-template-rows: repeat(5, 1fr);
@@ -161,34 +161,34 @@ const LabelGeneration: React.FC = () => {
             page-break-after: always;
             page-break-inside: avoid;
           }
-          
+
           .page:last-child {
             page-break-after: auto;
           }
-          
-          .label { 
+
+          .label {
             width: 100%;
             height: 100%;
-            border: 2px solid #000; 
+            border: 2px solid #000;
             display: flex;
             flex-direction: column;
             position: relative;
             background: white;
             overflow: hidden;
           }
-          
+
           .label-tpr {
             background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);
             color: white;
             border-color: #dc2626;
           }
-          
+
           .label-regular {
             background: #f8fafc;
             color: #1f2937;
             border-color: #374151;
           }
-          
+
           .tpr-badge {
             position: absolute;
             top: 3px;
@@ -202,7 +202,7 @@ const LabelGeneration: React.FC = () => {
             z-index: 2;
             box-shadow: 0 1px 2px rgba(0,0,0,0.1);
           }
-          
+
           .original-price {
             position: absolute;
             top: 3px;
@@ -217,7 +217,7 @@ const LabelGeneration: React.FC = () => {
             z-index: 2;
             box-shadow: 0 1px 2px rgba(0,0,0,0.1);
           }
-          
+
           .price-section {
             flex: 1;
             display: flex;
@@ -228,7 +228,7 @@ const LabelGeneration: React.FC = () => {
             text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
             padding: 8px;
           }
-          
+
           .description {
             padding: 4px 6px;
             font-size: 11px;
@@ -243,7 +243,7 @@ const LabelGeneration: React.FC = () => {
             align-items: center;
             justify-content: center;
           }
-          
+
           .upc {
             padding: 2px 6px;
             font-size: 9px;
@@ -254,19 +254,19 @@ const LabelGeneration: React.FC = () => {
             border-top: 1px solid rgba(0,0,0,0.1);
             letter-spacing: 0.5px;
           }
-          
+
           @media print {
             body { margin: 0; }
             .page { margin: 0; }
-            @page { 
-              margin: 0; 
+            @page {
+              margin: 0;
               size: letter;
             }
           }
-          
+
           @media screen {
-            body { 
-              background: #f3f4f6; 
+            body {
+              background: #f3f4f6;
               padding: 20px;
             }
             .page {
@@ -314,7 +314,7 @@ const LabelGeneration: React.FC = () => {
         `
           )
           .join("")}
-        
+
         <script>
           window.onload = function() {
             setTimeout(function() {
@@ -544,52 +544,49 @@ const LabelGeneration: React.FC = () => {
             {/* Labels Display */}
             <div className="bg-white rounded-xl shadow-lg p-6">
               {previewMode ? (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-                  {labels.map((label) => (
-                    <div
-                      key={label.id}
-                      className={`relative border-2 rounded-lg p-3 cursor-pointer transition-all aspect-[4/5] ${
-                        selectedLabels.has(label.id)
-                          ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200"
-                          : "border-gray-200 hover:border-gray-300 hover:shadow-md"
-                      } ${
-                        label.isTpr
-                          ? "bg-gradient-to-br from-red-50 to-red-100"
-                          : "bg-gray-50"
-                      }`}
-                      onClick={() => toggleLabelSelection(label.id)}
-                    >
-                      <div className="h-full flex flex-col">
-                        {label.isTpr && (
-                          <div className="absolute top-1 left-1 bg-yellow-400 text-black text-xs px-1 py-0.5 rounded font-bold">
-                            TPR
-                          </div>
-                        )}
-                        {label.originalPrice && label.isTpr && (
-                          <div className="absolute top-1 right-1 text-xs line-through text-gray-600 bg-white px-1 rounded">
-                            {label.originalPrice}
-                          </div>
-                        )}
-                        <div className="flex-1 flex items-center justify-center">
-                          <div className="text-lg font-bold text-center">
-                            {label.price}
-                          </div>
-                        </div>
-                        <div
-                          className="text-xs text-gray-700 text-center mb-1 truncate px-1"
-                          title={label.description}
-                        >
-                          {label.description}
-                        </div>
-                        <div className="text-xs text-gray-500 font-mono text-center">
-                          {label.upc}
-                        </div>
-                      </div>
-                      {selectedLabels.has(label.id) && (
-                        <CheckSquare className="absolute -top-2 -right-2 h-6 w-6 text-blue-600 bg-white rounded-full shadow-lg" />
-                      )}
-                    </div>
-                  ))}
+                <div
+                  className={
+                    labels[0]?.isTpr
+                      ? "grid grid-cols-5 gap-1"
+                      : "grid grid-cols-3 gap-1"
+                  }
+                >
+                  {labels.map((label, index) =>
+                    label.isTpr ? (
+                      <TPRLabel
+                        key={index}
+                        itemCode={label.originalDetails?.ITEM_CODE || "null"}
+                        description={label.description || "null"}
+                        size={label.originalDetails?.SIZE || "null"}
+                        pack={label.originalDetails?.PACK || "null"}
+                        upc={label.upc}
+                        baseRetail={
+                          Number(label.originalDetails?.BASE_RETAIL) || 0
+                        }
+                        tprRetail={
+                          Number(label.originalDetails?.TPR_RETAIL) || 0
+                        }
+                        expires={
+                          label.originalDetails?.DEAL_END_DATE1 || "null"
+                        }
+                        recordStatusDate="06/29/2025"
+                      />
+                    ) : (
+                      <NONTPRLabel
+                        key={index}
+                        itemCode={label.originalDetails?.ITEM_CODE || "null"}
+                        baseRetail={
+                          Number(label.originalDetails?.BASE_RETAIL) || 0.0
+                        }
+                        description={label.description || "null"}
+                        upc={label.upc}
+                        pack={label.originalDetails?.PACK || "null"}
+                        size={label.originalDetails?.SIZE || "null"}
+                        pq65={label.originalDetails?.PQ65 || "null"}
+                        recordStatusDate="2025-06-29"
+                      />
+                    )
+                  )}
                 </div>
               ) : (
                 <div className="overflow-hidden rounded-lg border border-gray-200">
