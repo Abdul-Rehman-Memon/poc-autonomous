@@ -22,7 +22,7 @@ const TPRLabel: React.FC<TPRLabelProps> = ({
   baseRetail,
   tprRetail,
   expires,
-  recordStatusDate,
+  // recordStatusDate,
 }) => {
   return (
     <div className="w-58 border border-black text-black text-xs font-bold bg-white">

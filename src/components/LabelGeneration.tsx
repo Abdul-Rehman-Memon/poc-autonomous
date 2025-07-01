@@ -1,7 +1,6 @@
 import React, { useState, useRef } from "react";
 import {
   Upload,
-  Download,
   FileSpreadsheet,
   Eye,
   Printer,
@@ -13,9 +12,9 @@ import * as XLSX from "xlsx";
 import type { LabelData, ProductData } from "../core/interface";
 import NONTPRLabel from "./NONTPRLabel";
 import TPRLabel from "./TPRLabel";
+import { renderNONTPRLabelAsHTML, renderTPRLabelAsHTML } from "../core/helper";
 
 const LabelGeneration: React.FC = () => {
-  const [excelData, setExcelData] = useState<ProductData[]>([]);
   const [labels, setLabels] = useState<LabelData[]>([]);
   const [selectedLabels, setSelectedLabels] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
@@ -38,8 +37,6 @@ const LabelGeneration: React.FC = () => {
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
       const jsonData = XLSX.utils.sheet_to_json(worksheet) as ProductData[];
-
-      setExcelData(jsonData);
 
       // Convert to label format
       const labelData: LabelData[] = jsonData.map((item, index) => {
@@ -116,7 +113,6 @@ const LabelGeneration: React.FC = () => {
   };
 
   const clearData = () => {
-    setExcelData([]);
     setLabels([]);
     setSelectedLabels(new Set());
     setFileName("");
@@ -125,250 +121,157 @@ const LabelGeneration: React.FC = () => {
     }
   };
 
-  const createPrintableHTML = (labelsToGenerate: LabelData[]): string => {
-    const labelPages = [];
-    for (let i = 0; i < labelsToGenerate.length; i += 25) {
-      labelPages.push(labelsToGenerate.slice(i, i + 25));
+  //   const createPrintableHTML = (labels: LabelData[]): string => `
+  // <!DOCTYPE html>
+  // <html>
+  // <head>
+  //   <title>Labels - ${new Date().toLocaleDateString()}</title>
+  //   <style>
+  //     /* 1) Full‑bleed, no printer margins */
+  //     @page { size: letter landscape; margin: 0; }
+  //     html, body {
+  //       margin: 0; padding: 0;
+  //       width: 100%; height: 100%;
+  //       box-sizing: border-box;
+  //       -webkit-print-color-adjust: exact;
+  //       print-color-adjust: exact;
+  //       font-family: Arial, sans-serif;
+  //     }
+
+  //     /* 2) Strict 5‑column grid (fits ~5 labels across on 11in width) */
+  //     .labels-container {
+  //       display: grid;
+  //       /* 11in wide paper minus zero margins => 11in total */
+  //       /* 5 columns => each column ~2.2in; adjust to your label width */
+  //       grid-template-columns: repeat(5, 1fr);
+  //       gap: 0.05in;            /* 3–4px gap for cutting */
+  //       padding: 0;             /* no extra padding */
+  //       width: 100%; height: 100%;
+  //       box-sizing: border-box;
+  //     }
+
+  //     /* 3) Prevent labels from splitting across pages */
+  //     .label {
+  //       break-inside: avoid;
+  //       page-break-inside: avoid;
+  //     }
+
+  //     /* 4) Ensure each label fills its cell exactly */
+  //     .label > div {
+  //       width: 100%; height: 100%;
+  //     }
+  //   </style>
+  // </head>
+  // <body>
+  //   <div class="labels-container">
+  //     ${labels
+  //       .map((label) => {
+  //         const html = label.isTpr
+  //           ? renderTPRLabelAsHTML(label)
+  //           : renderNONTPRLabelAsHTML(label);
+  //         return `<div class="label">${html}</div>`;
+  //       })
+  //       .join("")}
+  //   </div>
+  // </body>
+  // </html>
+  // `;
+
+  const createPrintableHTML = (labels: LabelData[]): string => `
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Labels - ${new Date().toLocaleDateString()}</title>
+  <style>
+    /* 1) Full‑bleed, no printer margins */
+    @page { size: letter landscape; margin: 0; }
+    html, body {
+      margin: 0; padding: 0;
+      width: 100%; height: 100%;
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+      font-family: Arial, sans-serif;
     }
 
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Labels - ${new Date().toLocaleDateString()}</title>
-        <style>
-          * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-          }
+    /* 2) Wrapping flex container */
+    .labels-container {
+      display: flex;
+      flex-wrap: wrap;
+      align-content: flex-start;
+      gap: 0.05in;      /* tiny gap for cut-lines */
+      padding: 0;       /* no extra padding */
+    }
 
-          body {
-            font-family: 'Arial', sans-serif;
-            background: white;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-          }
+    /* 3) Prevent any label from splitting across pages */
+    .label {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
 
-          .page {
-            width: 8.5in;
-            height: 11in;
-            display: grid;
-            grid-template-columns: repeat(5, 1fr);
-            grid-template-rows: repeat(5, 1fr);
-            gap: 0.05in;
-            padding: 0.25in;
-            page-break-after: always;
-            page-break-inside: avoid;
-          }
+    /* 4) Make each inner label HTML fill its flex item */
+    .label > div {
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div class="labels-container">
+    ${labels
+      .map((label) => {
+        const html = label.isTpr
+          ? renderTPRLabelAsHTML(label)
+          : renderNONTPRLabelAsHTML(label);
+        // wrap in .label so flex uses the inline width defined in each
+        return `<div class="label">${html}</div>`;
+      })
+      .join("")}
+  </div>
+</body>
+</html>
+`;
 
-          .page:last-child {
-            page-break-after: auto;
-          }
+  const printLabels = (labelsToPrint: LabelData[]) => {
+    if (labelsToPrint.length === 0) {
+      alert("No labels available to print.");
+      return;
+    }
 
-          .label {
-            width: 100%;
-            height: 100%;
-            border: 2px solid #000;
-            display: flex;
-            flex-direction: column;
-            position: relative;
-            background: white;
-            overflow: hidden;
-          }
+    const htmlContent = createPrintableHTML(labelsToPrint);
+    console.log("Printing labels:", htmlContent);
 
-          .label-tpr {
-            background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);
-            color: white;
-            border-color: #dc2626;
-          }
-
-          .label-regular {
-            background: #f8fafc;
-            color: #1f2937;
-            border-color: #374151;
-          }
-
-          .tpr-badge {
-            position: absolute;
-            top: 3px;
-            left: 3px;
-            background: #fbbf24;
-            color: #1f2937;
-            padding: 2px 6px;
-            font-size: 10px;
-            font-weight: bold;
-            border-radius: 3px;
-            z-index: 2;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
-          }
-
-          .original-price {
-            position: absolute;
-            top: 3px;
-            right: 3px;
-            font-size: 12px;
-            text-decoration: line-through;
-            background: rgba(255,255,255,0.95);
-            color: #1f2937;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-weight: bold;
-            z-index: 2;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
-          }
-
-          .price-section {
-            flex: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 32px;
-            font-weight: bold;
-            text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
-            padding: 8px;
-          }
-
-          .description {
-            padding: 4px 6px;
-            font-size: 11px;
-            text-align: center;
-            background: rgba(255,255,255,0.95);
-            color: #1f2937;
-            border-top: 1px solid rgba(0,0,0,0.1);
-            font-weight: 500;
-            line-height: 1.2;
-            min-height: 24px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-          }
-
-          .upc {
-            padding: 2px 6px;
-            font-size: 9px;
-            text-align: center;
-            background: rgba(255,255,255,0.9);
-            color: #4b5563;
-            font-family: 'Courier New', monospace;
-            border-top: 1px solid rgba(0,0,0,0.1);
-            letter-spacing: 0.5px;
-          }
-
-          @media print {
-            body { margin: 0; }
-            .page { margin: 0; }
-            @page {
-              margin: 0;
-              size: letter;
-            }
-          }
-
-          @media screen {
-            body {
-              background: #f3f4f6;
-              padding: 20px;
-            }
-            .page {
-              box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-              margin-bottom: 20px;
-              background: white;
-            }
-          }
-        </style>
-      </head>
-      <body>
-        ${labelPages
-          .map(
-            (page, pageIndex) => `
-          <div class="page">
-            ${page
-              .map(
-                (label) => `
-              <div class="label ${label.isTpr ? "label-tpr" : "label-regular"}">
-                ${label.isTpr ? '<div class="tpr-badge">BUY 1 GET 1</div>' : ""}
-                ${
-                  label.originalPrice && label.isTpr
-                    ? `<div class="original-price">${label.originalPrice}</div>`
-                    : ""
-                }
-                <div class="price-section">${label.price}</div>
-                <div class="description">${
-                  label.description.length > 35
-                    ? label.description.substring(0, 35) + "..."
-                    : label.description
-                }</div>
-                <div class="upc">${label.upc}</div>
-              </div>
-            `
-              )
-              .join("")}
-            ${Array(25 - page.length)
-              .fill(0)
-              .map(
-                () =>
-                  '<div class="label" style="border: 1px dashed #ccc; background: #f9f9f9;"></div>'
-              )
-              .join("")}
-          </div>
-        `
-          )
-          .join("")}
-
-        <script>
-          window.onload = function() {
-            setTimeout(function() {
-              window.print();
-            }, 500);
-          }
-        </script>
-      </body>
-      </html>
-    `;
-  };
-
-  const downloadLabels = (labelsToGenerate: LabelData[], filename: string) => {
-    const htmlContent = createPrintableHTML(labelsToGenerate);
     const blob = new Blob([htmlContent], { type: "text/html" });
+
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${filename}_${new Date().toISOString().split("T")[0]}.html`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    const printWindow = window.open(url, "_blank");
+    if (printWindow) {
+      printWindow.focus();
+      printWindow.onload = () => {
+        setTimeout(() => {
+          printWindow.print();
+          printWindow.onafterprint = () => {
+            printWindow.close();
+            URL.revokeObjectURL(url);
+          };
+        }, 500);
+      };
+    }
   };
 
-  const downloadSelected = () => {
+  const printSelected = () => {
     const selectedLabelData = labels.filter((label) =>
       selectedLabels.has(label.id)
     );
     if (selectedLabelData.length === 0) {
-      alert("Please select at least one label to download.");
+      alert("Please select at least one label to print.");
       return;
     }
-    downloadLabels(
-      selectedLabelData,
-      `labels_selected_${selectedLabelData.length}`
-    );
+    printLabels(selectedLabelData);
   };
 
-  const downloadAll = () => {
-    if (labels.length === 0) {
-      alert("No labels available to download.");
-      return;
-    }
-    downloadLabels(labels, `labels_all_${labels.length}`);
-  };
-
-  const previewLabels = (labelsToPreview: LabelData[]) => {
-    const htmlContent = createPrintableHTML(labelsToPreview);
-    const previewWindow = window.open("", "_blank");
-    if (previewWindow) {
-      previewWindow.document.write(htmlContent);
-      previewWindow.document.close();
-    }
+  const printAll = () => {
+    printLabels(labels);
   };
 
   return (
@@ -506,37 +409,23 @@ const LabelGeneration: React.FC = () => {
                 </div>
               </div>
 
-              {/* Download Controls */}
+              {/* Download and Print Controls */}
               <div className="flex gap-4 justify-center border-t pt-6">
                 <button
-                  onClick={downloadSelected}
+                  onClick={printSelected}
                   disabled={selectedLabels.size === 0}
-                  className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-                >
-                  <Download className="h-5 w-5" />
-                  Download Selected ({selectedLabels.size})
-                </button>
-
-                <button
-                  onClick={downloadAll}
-                  className="flex items-center gap-2 bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition-colors"
-                >
-                  <Download className="h-5 w-5" />
-                  Download All ({labels.length})
-                </button>
-
-                <button
-                  onClick={() =>
-                    previewLabels(
-                      selectedLabels.size > 0
-                        ? labels.filter((l) => selectedLabels.has(l.id))
-                        : labels
-                    )
-                  }
-                  className="flex items-center gap-2 bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 transition-colors"
+                  className="flex items-center gap-2 bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
                 >
                   <Printer className="h-5 w-5" />
-                  Preview Print
+                  Print Selected ({selectedLabels.size})
+                </button>
+
+                <button
+                  onClick={printAll}
+                  className="flex items-center gap-2 bg-orange-600 text-white px-6 py-3 rounded-lg hover:bg-orange-700 transition-colors"
+                >
+                  <Printer className="h-5 w-5" />
+                  Print All ({labels.length})
                 </button>
               </div>
             </div>
@@ -551,44 +440,89 @@ const LabelGeneration: React.FC = () => {
                       : "grid grid-cols-3 gap-1"
                   }
                 >
-                  {labels.map((label, index) =>
-                    label.isTpr ? (
-                      <TPRLabel
-                        key={index}
-                        itemCode={label.originalDetails?.ITEM_CODE || "null"}
-                        description={label.description || "null"}
-                        size={label.originalDetails?.SIZE || "null"}
-                        pack={label.originalDetails?.PACK || "null"}
-                        upc={label.upc}
-                        baseRetail={
-                          Number(label.originalDetails?.BASE_RETAIL) || 0
-                        }
-                        tprRetail={
-                          Number(label.originalDetails?.TPR_RETAIL) || 0
-                        }
-                        expires={
-                          label.originalDetails?.DEAL_END_DATE1 || "null"
-                        }
-                        recordStatusDate="06/29/2025"
-                      />
-                    ) : (
-                      <NONTPRLabel
-                        key={index}
-                        itemCode={label.originalDetails?.ITEM_CODE || "null"}
-                        baseRetail={
-                          Number(label.originalDetails?.BASE_RETAIL) || 0.0
-                        }
-                        description={label.description || "null"}
-                        upc={label.upc}
-                        pack={label.originalDetails?.PACK || "null"}
-                        size={label.originalDetails?.SIZE || "null"}
-                        pq65={label.originalDetails?.PQ65 || "null"}
-                        recordStatusDate="2025-06-29"
-                      />
-                    )
-                  )}
+                  {labels.map((label, index) => (
+                    <div
+                      key={label.id}
+                      className={`relative border-1 p-0 cursor-pointer transition-all ${
+                        selectedLabels.has(label.id)
+                          ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200"
+                          : "border-gray-200 hover:border-gray-300 hover:shadow-md"
+                      } ${
+                        label.isTpr
+                          ? "bg-gradient-to-br from-red-50 to-red-100"
+                          : "bg-gray-50"
+                      }`}
+                      onClick={() => toggleLabelSelection(label.id)}
+                    >
+                      <div className="h-full flex flex-col">
+                        {label.isTpr && (
+                          <div className="absolute top-1 left-1 bg-yellow-400 text-black text-xs px-1 py-0.5 rounded font-bold">
+                            TPR
+                          </div>
+                        )}
+                        {label.originalPrice && label.isTpr && (
+                          <div className="absolute top-1 right-1 text-xs line-through text-gray-600 bg-white px-1 rounded">
+                            {label.originalPrice}
+                          </div>
+                        )}
+
+                        <div
+                          className={
+                            label.isTpr
+                              ? "grid grid-cols-5 gap-1"
+                              : "grid grid-cols-3 gap-1"
+                          }
+                        >
+                          {label.isTpr ? (
+                            <TPRLabel
+                              key={index}
+                              itemCode={
+                                label.originalDetails?.ITEM_CODE || "null"
+                              }
+                              description={label.description || "null"}
+                              size={label.originalDetails?.SIZE || "null"}
+                              pack={label.originalDetails?.PACK || "null"}
+                              upc={label.upc}
+                              baseRetail={
+                                Number(label.originalDetails?.BASE_RETAIL) || 0
+                              }
+                              tprRetail={
+                                Number(label.originalDetails?.TPR_RETAIL) || 0
+                              }
+                              expires={
+                                label.originalDetails?.DEAL_END_DATE1 || "null"
+                              }
+                              recordStatusDate="06/29/2025"
+                            />
+                          ) : (
+                            <NONTPRLabel
+                              key={index}
+                              itemCode={
+                                label.originalDetails?.ITEM_CODE || "null"
+                              }
+                              baseRetail={
+                                Number(label.originalDetails?.BASE_RETAIL) ||
+                                0.0
+                              }
+                              description={label.description || "null"}
+                              upc={label.upc}
+                              pack={label.originalDetails?.PACK || "null"}
+                              size={label.originalDetails?.SIZE || "null"}
+                              pq65={label.originalDetails?.PQ65 || "null"}
+                              recordStatusDate="2025-06-29"
+                            />
+                          )}
+                        </div>
+                      </div>
+
+                      {selectedLabels.has(label.id) && (
+                        <CheckSquare className="absolute -top-2 -right-2 h-6 w-6 text-blue-600 bg-white rounded-full shadow-lg" />
+                      )}
+                    </div>
+                  ))}
                 </div>
               ) : (
+                // The table mode remains unchanged
                 <div className="overflow-hidden rounded-lg border border-gray-200">
                   <div className="max-h-96 overflow-y-auto">
                     <table className="min-w-full divide-y divide-gray-200">
