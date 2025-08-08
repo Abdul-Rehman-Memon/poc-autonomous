@@ -7,26 +7,74 @@ import {
   CheckSquare,
   Square,
   Trash2,
+  AlertCircle,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import type { LabelData, ProductData } from "../core/interface";
 import NONTPRLabel from "./NONTPRLabel";
 import TPRLabel from "./TPRLabel";
-import { renderNONTPRLabelAsHTML, renderTPRLabelAsHTML } from "../core/helper";
+import {
+  renderNONTPRLabelAsHTML,
+  renderTPRLabelAsHTML,
+  renderPriceLabelAsHTML,
+} from "../core/helper";
+import PriceLabel from "./PriceLabel";
 
 const LabelGeneration: React.FC = () => {
-  const [labels, setLabels] = useState<LabelData[]>([]);
+  // Extended local label type so we can store the explicit label type
+  type ExtendedLabelData = LabelData & {
+    labelType: "NON_TPR" | "TPR" | "PRICE";
+  };
+
+  const [labels, setLabels] = useState<ExtendedLabelData[]>([]);
   const [selectedLabels, setSelectedLabels] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
   const [fileName, setFileName] = useState("");
   const [previewMode, setPreviewMode] = useState(false);
+  const [showLabelTypeSelection, setShowLabelTypeSelection] = useState(true);
+  const [selectedLabelType, setSelectedLabelType] = useState<
+    "NON_TPR" | "TPR" | "PRICE" | null
+  >(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Required columns for each label type
+  const REQUIRED_COLUMNS = {
+    NON_TPR: [
+      "ITEM_CODE",
+      "DESCRIPTION", // or 'Item Name'
+      "UPC", // or 'Barcode' or 'Code'
+      "PACK",
+      "SIZE",
+      "BASE_RETAIL", // or 'Price' or 'RETAIL'
+      "PQ65", // Product Quantity
+    ],
+    TPR: [
+      "ITEM_CODE",
+      "DESCRIPTION", // or 'Item Name'
+      "UPC", // or 'Barcode' or 'Code'
+      "PACK",
+      "SIZE",
+      "BASE_RETAIL", // or 'Price' (Non-TPR Price)
+      "TPR_RETAIL", // TPR Price
+      "DEAL_END_DATE1", // Expiry Date
+    ],
+    PRICE: [
+      "ITEM_CODE",
+      "DESCRIPTION", // or 'Item Name'
+      "UPC", // or 'Barcode' or 'Code'
+    ],
+  };
 
   const handleFileUpload = async (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
     const file = event.target.files?.[0];
     if (!file) return;
+
+    if (!selectedLabelType) {
+      alert("Please select a label type first.");
+      return;
+    }
 
     setIsLoading(true);
     setFileName(file.name);
@@ -38,25 +86,42 @@ const LabelGeneration: React.FC = () => {
       const worksheet = workbook.Sheets[sheetName];
       const jsonData = XLSX.utils.sheet_to_json(worksheet) as ProductData[];
 
-      // Convert to label format
-      const labelData: LabelData[] = jsonData.map((item, index) => {
-        const isTpr = detectTprProduct(item);
+      // Validate columns based on pre-selected label type
+      const missingColumns = validateColumns(
+        jsonData,
+        selectedLabelType as "NON_TPR" | "TPR" | "PRICE"
+      );
+
+      if (missingColumns.length > 0) {
+        const columnList = missingColumns.join(", ");
+        alert(
+          `Missing required columns for ${selectedLabelType} labels: ${columnList}\n\nPlease ensure your Excel file contains all required columns.`
+        );
+        setIsLoading(false);
+        return;
+      }
+
+      // If validation passes, generate labels directly
+      const labelData: ExtendedLabelData[] = jsonData.map((item, index) => {
+        const isTpr = selectedLabelType === "TPR";
+        const labelType =
+          selectedLabelType === "PRICE" ? "PRICE" : isTpr ? "TPR" : "NON_TPR";
         return {
-          id: `label-${index}`,
+          id: `label-${index}-${Math.random().toString(36).slice(2, 8)}`,
           description: getDescription(item),
-          price: getPrice(item, isTpr),
+          price: getPrice(item, isTpr), // for PRICE, will use BASE_RETAIL when present, else $0.00
           originalPrice: isTpr ? getOriginalPrice(item) : undefined,
           upc: getUPC(item),
           isTpr,
           selected: false,
           originalDetails: item,
-        };
+          labelType,
+        } as ExtendedLabelData;
       });
-
-      console.log({ labelData: labelData[0].originalDetails });
 
       setLabels(labelData);
       setSelectedLabels(new Set()); // Reset selection
+      setShowLabelTypeSelection(false);
     } catch (error) {
       console.error("Error reading file:", error);
       alert("Error reading Excel file. Please check the file format.");
@@ -65,12 +130,58 @@ const LabelGeneration: React.FC = () => {
     }
   };
 
-  const detectTprProduct = (item: ProductData): boolean => {
-    return !!(
-      item.TPR_RETAIL ||
-      item.TPR_INDICATOR === "Y" ||
-      item.TPR_INDICATOR === "1"
-    );
+  const validateColumns = (
+    data: ProductData[],
+    labelType: "NON_TPR" | "TPR" | "PRICE"
+  ): string[] => {
+    if (data.length === 0) return [];
+
+    const sampleRow = data[0];
+    const availableColumns = Object.keys(sampleRow);
+    const requiredColumns = REQUIRED_COLUMNS[labelType];
+    const missingColumns: string[] = [];
+
+    requiredColumns.forEach((requiredCol) => {
+      let found = false;
+
+      // Check for exact match first
+      if (availableColumns.includes(requiredCol)) {
+        found = true;
+      } else {
+        // Check for alternative column names
+        switch (requiredCol) {
+          case "DESCRIPTION":
+            if (availableColumns.includes("Item Name")) found = true;
+            break;
+          case "UPC":
+            if (
+              availableColumns.includes("Barcode") ||
+              availableColumns.includes("Code")
+            )
+              found = true;
+            break;
+          case "BASE_RETAIL":
+            if (
+              availableColumns.includes("Price") ||
+              availableColumns.includes("RETAIL")
+            )
+              found = true;
+            break;
+        }
+      }
+
+      if (!found) {
+        missingColumns.push(requiredCol);
+      }
+    });
+
+    return missingColumns;
+  };
+
+  const generateLabels = (labelType: "NON_TPR" | "TPR" | "PRICE") => {
+    setSelectedLabelType(labelType);
+    setShowLabelTypeSelection(false);
+    // The actual label generation now happens in handleFileUpload after validation
   };
 
   const getDescription = (item: ProductData): string => {
@@ -116,74 +227,20 @@ const LabelGeneration: React.FC = () => {
     setLabels([]);
     setSelectedLabels(new Set());
     setFileName("");
+    setShowLabelTypeSelection(true);
+    setSelectedLabelType(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
   };
 
-  //   const createPrintableHTML = (labels: LabelData[]): string => `
-  // <!DOCTYPE html>
-  // <html>
-  // <head>
-  //   <title>Labels - ${new Date().toLocaleDateString()}</title>
-  //   <style>
-  //     /* 1) Full‑bleed, no printer margins */
-  //     @page { size: letter landscape; margin: 0; }
-  //     html, body {
-  //       margin: 0; padding: 0;
-  //       width: 100%; height: 100%;
-  //       box-sizing: border-box;
-  //       -webkit-print-color-adjust: exact;
-  //       print-color-adjust: exact;
-  //       font-family: Arial, sans-serif;
-  //     }
-
-  //     /* 2) Strict 5‑column grid (fits ~5 labels across on 11in width) */
-  //     .labels-container {
-  //       display: grid;
-  //       /* 11in wide paper minus zero margins => 11in total */
-  //       /* 5 columns => each column ~2.2in; adjust to your label width */
-  //       grid-template-columns: repeat(5, 1fr);
-  //       gap: 0.05in;            /* 3–4px gap for cutting */
-  //       padding: 0;             /* no extra padding */
-  //       width: 100%; height: 100%;
-  //       box-sizing: border-box;
-  //     }
-
-  //     /* 3) Prevent labels from splitting across pages */
-  //     .label {
-  //       break-inside: avoid;
-  //       page-break-inside: avoid;
-  //     }
-
-  //     /* 4) Ensure each label fills its cell exactly */
-  //     .label > div {
-  //       width: 100%; height: 100%;
-  //     }
-  //   </style>
-  // </head>
-  // <body>
-  //   <div class="labels-container">
-  //     ${labels
-  //       .map((label) => {
-  //         const html = label.isTpr
-  //           ? renderTPRLabelAsHTML(label)
-  //           : renderNONTPRLabelAsHTML(label);
-  //         return `<div class="label">${html}</div>`;
-  //       })
-  //       .join("")}
-  //   </div>
-  // </body>
-  // </html>
-  // `;
-
-  const createPrintableHTML = (labels: LabelData[]): string => `
+  const createPrintableHTML = (labelsToRender: ExtendedLabelData[]): string => `
 <!DOCTYPE html>
 <html>
 <head>
   <title>Labels - ${new Date().toLocaleDateString()}</title>
   <style>
-    /* 1) Full‑bleed, no printer margins */
+    /* 1) Full-bleed, no printer margins */
     @page { size: letter landscape; margin: 0; }
     html, body {
       margin: 0; padding: 0;
@@ -218,12 +275,20 @@ const LabelGeneration: React.FC = () => {
 </head>
 <body>
   <div class="labels-container">
-    ${labels
+    ${labelsToRender
       .map((label) => {
-        const html = label.isTpr
-          ? renderTPRLabelAsHTML(label)
-          : renderNONTPRLabelAsHTML(label);
-        // wrap in .label so flex uses the inline width defined in each
+        let html = "";
+        switch (label.labelType) {
+          case "TPR":
+            html = renderTPRLabelAsHTML(label);
+            break;
+          case "PRICE":
+            html = renderPriceLabelAsHTML(label);
+            break;
+          case "NON_TPR":
+            html = renderNONTPRLabelAsHTML(label);
+            break;
+        }
         return `<div class="label">${html}</div>`;
       })
       .join("")}
@@ -232,14 +297,13 @@ const LabelGeneration: React.FC = () => {
 </html>
 `;
 
-  const printLabels = (labelsToPrint: LabelData[]) => {
+  const printLabels = (labelsToPrint: ExtendedLabelData[]) => {
     if (labelsToPrint.length === 0) {
       alert("No labels available to print.");
       return;
     }
 
     const htmlContent = createPrintableHTML(labelsToPrint);
-    console.log("Printing labels:", htmlContent);
 
     const blob = new Blob([htmlContent], { type: "text/html" });
 
@@ -288,7 +352,7 @@ const LabelGeneration: React.FC = () => {
                 Generate professional price labels from Excel data
               </p>
             </div>
-            {labels.length > 0 && (
+            {(labels.length > 0 || selectedLabelType) && (
               <button
                 onClick={clearData}
                 className="flex items-center gap-2 px-4 py-2 text-red-600 border border-red-300 rounded-lg hover:bg-red-50 transition-colors"
@@ -302,16 +366,152 @@ const LabelGeneration: React.FC = () => {
       </div>
 
       <div className="max-w-7xl mx-auto px-6 py-6">
-        {/* Upload Section */}
-        {labels.length === 0 && (
+        {/* Label Type Selection - Show First */}
+        {showLabelTypeSelection && !selectedLabelType && (
+          <div className="bg-white rounded-xl shadow-lg p-8 mb-6">
+            <div className="text-center">
+              <AlertCircle className="mx-auto h-16 w-16 text-orange-600 mb-4" />
+              <h2 className="text-2xl font-bold text-gray-900 mb-2">
+                Select Label Type
+              </h2>
+              <p className="text-gray-600 mb-6">
+                Choose which type of labels you want to generate before
+                uploading your file.
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto">
+                {/* NON-TPR Option */}
+                <div className="border border-gray-200 rounded-lg p-6 hover:border-green-400 hover:shadow-lg transition-all">
+                  <div className="text-center mb-4">
+                    <div className="bg-green-100 text-green-800 inline-flex px-3 py-1 text-sm font-semibold rounded-full mb-3">
+                      NON-TPR LABELS
+                    </div>
+                    <h3 className="text-lg font-bold text-gray-900 mb-2">
+                      Regular Price Labels
+                    </h3>
+                    <p className="text-sm text-gray-600 mb-4">
+                      Generate standard price labels for regular products
+                    </p>
+                  </div>
+
+                  <div className="text-left mb-6">
+                    <h4 className="font-semibold text-gray-900 mb-2">
+                      Required Columns:
+                    </h4>
+                    <ul className="text-xs text-gray-600 space-y-1">
+                      <li>• ITEM_CODE</li>
+                      <li>• DESCRIPTION (or Item Name)</li>
+                      <li>• UPC (or Barcode/Code)</li>
+                      <li>• PACK</li>
+                      <li>• SIZE</li>
+                      <li>• BASE_RETAIL (or Price/RETAIL)</li>
+                      <li>• PQ65 (Product Quantity)</li>
+                    </ul>
+                  </div>
+
+                  <button
+                    onClick={() => generateLabels("NON_TPR")}
+                    className="w-full bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition-colors font-medium"
+                  >
+                    Select NON-TPR Labels
+                  </button>
+                </div>
+
+                {/* TPR Option */}
+                <div className="border border-gray-200 rounded-lg p-6 hover:border-red-400 hover:shadow-lg transition-all">
+                  <div className="text-center mb-4">
+                    <div className="bg-red-100 text-red-800 inline-flex px-3 py-1 text-sm font-semibold rounded-full mb-3">
+                      TPR LABELS
+                    </div>
+                    <h3 className="text-lg font-bold text-gray-900 mb-2">
+                      Temporary Price Reduction
+                    </h3>
+                    <p className="text-sm text-gray-600 mb-4">
+                      Generate sale/promotional price labels with original
+                      pricing
+                    </p>
+                  </div>
+
+                  <div className="text-left mb-6">
+                    <h4 className="font-semibold text-gray-900 mb-2">
+                      Required Columns:
+                    </h4>
+                    <ul className="text-xs text-gray-600 space-y-1">
+                      <li>• ITEM_CODE</li>
+                      <li>• DESCRIPTION (or Item Name)</li>
+                      <li>• UPC (or Barcode/Code)</li>
+                      <li>• PACK</li>
+                      <li>• SIZE</li>
+                      <li>• BASE_RETAIL (Non-TPR Price)</li>
+                      <li>• TPR_RETAIL (TPR Price)</li>
+                      <li>• DEAL_END_DATE1 (Expiry Date)</li>
+                    </ul>
+                  </div>
+
+                  <button
+                    onClick={() => generateLabels("TPR")}
+                    className="w-full bg-red-600 text-white px-6 py-3 rounded-lg hover:bg-red-700 transition-colors font-medium"
+                  >
+                    Select TPR Labels
+                  </button>
+                </div>
+
+                {/* PRICE Option */}
+                <div className="border border-gray-200 rounded-lg p-6 hover:border-yellow-400 hover:shadow-lg transition-all">
+                  <div className="text-center mb-4">
+                    <div className="bg-yellow-100 text-yellow-800 inline-flex px-3 py-1 text-sm font-semibold rounded-full mb-3">
+                      PRICE LABELS
+                    </div>
+                    <h3 className="text-lg font-bold text-gray-900 mb-2">
+                      Price-only Label
+                    </h3>
+                    <p className="text-sm text-gray-600 mb-4">
+                      Minimal label (ITEM_CODE, DESCRIPTION, UPC). Visual is
+                      same as NON-TPR.
+                    </p>
+                  </div>
+
+                  <div className="text-left mb-6">
+                    <h4 className="font-semibold text-gray-900 mb-2">
+                      Required Columns:
+                    </h4>
+                    <ul className="text-xs text-gray-600 space-y-1">
+                      <li>• ITEM_CODE</li>
+                      <li>• DESCRIPTION (or Item Name)</li>
+                      <li>• UPC (or Barcode/Code)</li>
+                    </ul>
+                  </div>
+
+                  <button
+                    onClick={() => generateLabels("PRICE")}
+                    className="w-full bg-yellow-600 text-white px-6 py-3 rounded-lg hover:bg-yellow-700 transition-colors font-medium"
+                  >
+                    Select PRICE Labels
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Upload Section - Show After Label Type Selection */}
+        {selectedLabelType && labels.length === 0 && (
           <div className="bg-white rounded-xl shadow-lg p-8 mb-6">
             <div className="text-center">
               <FileSpreadsheet className="mx-auto h-16 w-16 text-blue-600 mb-4" />
               <h2 className="text-2xl font-bold text-gray-900 mb-2">
                 Upload Excel File
               </h2>
-              <p className="text-gray-600 mb-6">
-                Upload your product data file to generate labels
+              <p className="text-gray-600 mb-2">
+                Upload your product data file to generate{" "}
+                <span className="font-semibold text-blue-600">
+                  {selectedLabelType}
+                </span>{" "}
+                labels
+              </p>
+              <p className="text-sm text-gray-500 mb-6">
+                The system will validate that all required columns are present
+                in your file
               </p>
 
               <div
@@ -323,7 +523,8 @@ const LabelGeneration: React.FC = () => {
                   {fileName || "Click to upload or drag and drop"}
                 </p>
                 <p className="text-sm text-gray-500">
-                  Excel files (.xlsx, .xls) • TPR and Non-TPR formats supported
+                  Excel files (.xlsx, .xls) • {selectedLabelType} format
+                  required
                 </p>
               </div>
 
@@ -339,7 +540,7 @@ const LabelGeneration: React.FC = () => {
                 <div className="mt-6 flex items-center justify-center">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
                   <span className="ml-3 text-gray-600 text-lg">
-                    Processing file...
+                    Processing and validating file...
                   </span>
                 </div>
               )}
@@ -362,7 +563,7 @@ const LabelGeneration: React.FC = () => {
                   </div>
                   <div className="text-center">
                     <div className="text-3xl font-bold text-red-600">
-                      {labels.filter((l) => l.isTpr).length}
+                      {labels.filter((l) => l.labelType === "TPR").length}
                     </div>
                     <div className="text-sm text-gray-600">TPR Products</div>
                   </div>
@@ -435,7 +636,7 @@ const LabelGeneration: React.FC = () => {
               {previewMode ? (
                 <div
                   className={
-                    labels[0]?.isTpr
+                    labels[0]?.labelType === "TPR"
                       ? "grid grid-cols-5 gap-1"
                       : "grid grid-cols-3 gap-1"
                   }
@@ -448,19 +649,21 @@ const LabelGeneration: React.FC = () => {
                           ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200"
                           : "border-gray-200 hover:border-gray-300 hover:shadow-md"
                       } ${
-                        label.isTpr
+                        label.labelType === "TPR"
                           ? "bg-gradient-to-br from-red-50 to-red-100"
+                          : label.labelType === "PRICE"
+                          ? "bg-yellow-50"
                           : "bg-gray-50"
                       }`}
                       onClick={() => toggleLabelSelection(label.id)}
                     >
                       <div className="h-full flex flex-col">
-                        {label.isTpr && (
+                        {label.labelType === "TPR" && (
                           <div className="absolute top-1 left-1 bg-yellow-400 text-black text-xs px-1 py-0.5 rounded font-bold">
                             TPR
                           </div>
                         )}
-                        {label.originalPrice && label.isTpr && (
+                        {label.originalPrice && label.labelType === "TPR" && (
                           <div className="absolute top-1 right-1 text-xs line-through text-gray-600 bg-white px-1 rounded">
                             {label.originalPrice}
                           </div>
@@ -468,12 +671,31 @@ const LabelGeneration: React.FC = () => {
 
                         <div
                           className={
-                            label.isTpr
+                            label.labelType === "TPR"
                               ? "grid grid-cols-5 gap-1"
                               : "grid grid-cols-3 gap-1"
                           }
                         >
-                          {label.isTpr ? (
+                          {label.labelType === "NON_TPR" && (
+                            // NON_TPR visual used for both NON_TPR and PRICE labels (as requested)
+                            <NONTPRLabel
+                              key={index}
+                              itemCode={
+                                label.originalDetails?.ITEM_CODE || "null"
+                              }
+                              baseRetail={
+                                Number(label.originalDetails?.BASE_RETAIL) ||
+                                0.0
+                              }
+                              description={label.description || "null"}
+                              upc={label.upc}
+                              pack={label.originalDetails?.PACK || "null"}
+                              size={label.originalDetails?.SIZE || "null"}
+                              pq65={label.originalDetails?.PQ65 || "null"}
+                              recordStatusDate="2025-06-29"
+                            />
+                          )}
+                          {label.labelType === "TPR" && (
                             <TPRLabel
                               key={index}
                               itemCode={
@@ -494,24 +716,26 @@ const LabelGeneration: React.FC = () => {
                               }
                               recordStatusDate="06/29/2025"
                             />
-                          ) : (
-                            <NONTPRLabel
-                              key={index}
-                              itemCode={
-                                label.originalDetails?.ITEM_CODE || "null"
-                              }
-                              baseRetail={
-                                Number(label.originalDetails?.BASE_RETAIL) ||
-                                0.0
-                              }
-                              description={label.description || "null"}
-                              upc={label.upc}
-                              pack={label.originalDetails?.PACK || "null"}
-                              size={label.originalDetails?.SIZE || "null"}
-                              pq65={label.originalDetails?.PQ65 || "null"}
-                              recordStatusDate="2025-06-29"
-                            />
                           )}
+                          {
+                            // PRICE visual used for both NON_TPR and PRICE labels (as requested)
+                            label.labelType === "PRICE" && (
+                              <PriceLabel
+                                key={index}
+                                itemCode={
+                                  label.originalDetails?.ITEM_CODE || "null"
+                                }
+                                description={label.description || "null"}
+                                upc={label.upc}
+                                pack={label.originalDetails?.PACK || "null"}
+                                size={label.originalDetails?.SIZE || "null"}
+                                baseRetail={
+                                  Number(label.originalDetails?.BASE_RETAIL) ||
+                                  0.0
+                                }
+                              />
+                            )
+                          }
                         </div>
                       </div>
 
@@ -591,12 +815,18 @@ const LabelGeneration: React.FC = () => {
                             <td className="px-6 py-4">
                               <span
                                 className={`inline-flex px-3 py-1 text-xs font-semibold rounded-full ${
-                                  label.isTpr
+                                  label.labelType === "TPR"
                                     ? "bg-red-100 text-red-800"
+                                    : label.labelType === "PRICE"
+                                    ? "bg-yellow-100 text-yellow-800"
                                     : "bg-green-100 text-green-800"
                                 }`}
                               >
-                                {label.isTpr ? "TPR" : "Regular"}
+                                {label.labelType === "TPR"
+                                  ? "TPR"
+                                  : label.labelType === "PRICE"
+                                  ? "PRICE"
+                                  : "Regular"}
                               </span>
                             </td>
                           </tr>

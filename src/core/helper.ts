@@ -202,3 +202,102 @@ export const renderNONTPRLabelAsHTML = (label: LabelData): string => {
     </div>
   `;
 };
+
+export const renderPriceLabelAsHTML = (label: LabelData): string => {
+  const barcodeSVG = generateBarcodeSVG(label.upc);
+
+  return `
+    <div style="
+      width: 4in;
+      height: 1.25in;
+      border: 1px solid black;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      grid-template-rows: auto auto auto auto auto;
+      font-size: 0.75rem;
+      font-family: Arial, sans-serif;
+      line-height: 1;
+      box-sizing: border-box;
+    ">
+      <!-- Item Code (header row) -->
+      <div style="
+        grid-column: 1 / span 3;
+        grid-row: 1 / span 1;
+        background-color: #fcd34d;
+        font-weight: bold;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.875rem;
+        border-bottom: 1px solid black;
+        box-sizing: border-box;
+      ">
+        ${label.originalDetails?.ITEM_CODE || ""}
+      </div>
+
+      <!-- Base Retail (spans all rows) -->
+      <div style="
+        grid-column: 4 / span 1;
+        grid-row: 1 / span 5;
+        background-color: #fcd34d;
+        font-weight: bold;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 2.25rem;
+        border-left: 1px solid black;
+        box-sizing: border-box;
+      ">
+        ${Number(label.originalDetails?.BASE_RETAIL || 0).toFixed(2)}
+      </div>
+
+      <!-- Description (row 2) -->
+      <div style="
+        grid-column: 1 / span 3;
+        grid-row: 2 / span 1;
+        padding: 0 0.25rem;
+        margin: 0;
+        box-sizing: border-box;
+      ">
+        ${label.description}
+      </div>
+
+      <!-- UPC (row 3, cols 1–2) -->
+      <div style="
+        grid-column: 1 / span 2;
+        grid-row: 3 / span 1;
+        padding: 0 0.25rem;
+        margin: 0;
+        box-sizing: border-box;
+      ">
+        ${label.upc}
+      </div>
+
+      <!-- Pack – Size (row 3, col 3) -->
+      <div style="
+        grid-column: 3 / span 1;
+        grid-row: 3 / span 1;
+        padding: 0 0.25rem;
+        margin: 0;
+        box-sizing: border-box;
+      ">
+        ${label.originalDetails?.PACK} - ${label.originalDetails?.SIZE}
+      </div>
+
+      <!-- Barcode (row 4) -->
+      <div style="
+        grid-column: 1 / span 3;
+        grid-row: 4 / span 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 0;
+        margin: 0;
+        box-sizing: border-box;
+      ">
+        ${barcodeSVG}
+      </div>
+
+    </div>
+  `;
+};
